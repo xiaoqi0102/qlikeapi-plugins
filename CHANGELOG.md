@@ -36,6 +36,11 @@
 - 测试 199 → **208** 个用例（新增 `/api/meta/options` 用例、`tests/test_static.py` 静态检查：
   `onclick` 反斜杠、内联脚本 `node --check`、页面引用完整性）。
 
+### Security
+- `python-multipart` 0.0.20 → **0.0.32**（清掉 Dependabot 13 条告警，含 4 条 high；
+  该库负责登录表单与 `/v1/images/edits` 的 multipart 解析，升级后已回归验证：208 用例 +
+  浏览器登录 + multipart 无 prompt 本地 400）。
+
 ### Fixed
 - 组件展示页内联脚本语法错误：HTML 拼在 JS 单引号字符串里时 `\'` 会**原样进入属性**，浏览器按 JS 解析
   直接报 `SyntaxError`，整块脚本失效（所有演示按钮点了没反应，只有控制台能看到）。改用 HTML 实体
