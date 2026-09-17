@@ -34,3 +34,10 @@ body.dark{
   --sh-3:0 2px 6px rgba(0,0,0,.50), 0 22px 48px -20px rgba(0,0,0,.80);
   --ring:0 0 0 3px rgba(47,107,255,.32);
 }
+
+/* 排版 / 间距 / 动效 —— docs/DESIGN-SYSTEM.md §2 的规范值（新组件一律引用，别写魔法数字） */
+:root{
+  --fs-xs:11px; --fs-sm:12px; --fs-base:13px; --fs-lg:15px; --fs-xl:18px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px;
+  --dur:.15s;
+}

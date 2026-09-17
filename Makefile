@@ -39,6 +39,10 @@ verify: ## 零成本验收：本地校验 / dry-run / 抹 prompt 探活（不打
 	$(PY) scripts/verify_v3.py
 
 ui-diff: ## 新旧样式 A/B 计算样式比对（需 playwright + chromium；期望「合计差异: 0」）
+	@# 前置：容器里要有一份「旧样式表」当对照组，重建镜像后会丢，需重新注入：
+	@#   git stash 前先备份旧 style.css，然后 docker cp <旧style.css> qlikeapi-plugins:/app/static/style.css
+	@curl -sf -o /dev/null http://127.0.0.1:$(PORT)/static/style.css || \
+	  { echo "✗ 容器内缺 /static/style.css（旧样式对照组），先 docker cp 注入，否则比对全是假差异"; exit 2; }
 	$(PY) scripts/ui_style_diff.py
 
 docker-build: ## 构建镜像
