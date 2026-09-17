@@ -836,3 +836,7 @@ body.dark .bar{background:#1b2434}
 .kit-code{margin:8px 0 0;padding:9px 11px;background:#f7f9fc;border:1px solid var(--line-2);border-radius:var(--r-xs);
   font-family:var(--mono);font-size:11.5px;color:var(--ink-2);white-space:pre-wrap;word-break:break-all}
 body.dark .kit-code{background:#111a28;border-color:var(--line)}
+
+/* ---- 品牌标识：与控制台标题/favicon 同源（白色圆角底 + 吉祥物图标）---- */
+.brand .logo{background:#fff;border:1px solid rgba(255,255,255,.14);box-shadow:0 6px 16px -8px rgba(0,0,0,.6)}
+.brand .logo img{width:23px;height:23px;display:block}

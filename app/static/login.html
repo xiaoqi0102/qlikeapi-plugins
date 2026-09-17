@@ -3,58 +3,107 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>登录 · qlikeapi-plugins</title>
-<link rel="stylesheet" href="/static/vendor/bootstrap.min.css">
+<title>登录 · QlikeAPI</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="stylesheet" href="/static/vendor/tabler-icons/tabler-icons.min.css">
-<link rel="stylesheet" href="/static/css/tokens.css">
-<link rel="stylesheet" href="/static/css/ui-kit.css">
+<link rel="stylesheet" href="/static/css/login.css">
 </head>
-<body>
-<div class="login-wrap">
-  <form class="login-card" id="f">
-    <div class="logo-lg"><i class="ti ti-arrows-shuffle"></i></div>
-    <h1>qlikeapi-plugins</h1>
-    <div class="sub">图片协议转换网关 · 控制台</div>
+<body class="lg-body">
+<div class="lg-wrap">
 
-    <div class="mb-3">
-      <label class="form-label">用户名</label>
-      <div class="input-group">
-        <span class="input-group-text bg-white"><i class="ti ti-user"></i></span>
-        <input class="form-control" name="username" autocomplete="username" placeholder="请输入用户名" required autofocus>
+  <div class="lg-brand">
+    <div class="lg-mark"><img src="/static/favicon.svg" alt="QlikeAPI"></div>
+    <h1 class="lg-name">QlikeAPI</h1>
+    <div class="lg-tag">图片协议转换网关 · 控制台</div>
+  </div>
+
+  <form class="lg-card" id="f" autocomplete="on">
+    <h1>欢迎回来</h1>
+    <p class="lg-lead">登录您的账户以继续</p>
+
+    <div class="lg-field">
+      <label for="u">用户名</label>
+      <div class="lg-input">
+        <i class="ti ti-user"></i>
+        <input id="u" name="username" autocomplete="username" placeholder="请输入用户名" required autofocus>
       </div>
     </div>
-    <div class="mb-4">
-      <label class="form-label">密码</label>
-      <div class="input-group">
-        <span class="input-group-text bg-white"><i class="ti ti-lock"></i></span>
-        <input class="form-control" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+
+    <div class="lg-field">
+      <label for="p">密码</label>
+      <div class="lg-input">
+        <i class="ti ti-lock"></i>
+        <input id="p" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+        <button class="lg-eye" type="button" id="eye" title="显示密码" aria-label="显示密码">
+          <i class="ti ti-eye"></i>
+        </button>
       </div>
     </div>
 
-    <button class="btn btn-primary w-100 justify-content-center py-2" type="submit">
-      <i class="ti ti-login"></i> 登 录
+    <button class="lg-btn" type="submit" id="btn">
+      <i class="ti ti-login-2"></i><span id="btnTxt">登录</span>
     </button>
-    <div class="hint mt-3 mb-0" id="msg" style="min-height:18px"></div>
+
+    <div class="lg-msg" id="msg" role="alert"></div>
   </form>
+
+  <div class="lg-foot">© 2026 QlikeAPI. All rights reserved.</div>
 </div>
-<script src="/static/js/ui-kit.js"></script>
+
 <script>
-document.getElementById('f').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const msg = document.getElementById('msg');
-  msg.className = 'hint mt-3 mb-0';
-  msg.textContent = '';
-  const fd = new FormData(e.target);
-  try {
-    const r = await fetch('/api/login', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({username: fd.get('username'), password: fd.get('password')})
-    });
-    const d = await r.json();
-    if (r.ok) location.href = '/';
-    else { msg.style.color = 'var(--err)'; msg.textContent = d.error || '登录失败'; }
-  } catch (err) { msg.style.color = 'var(--err)'; msg.textContent = '网络错误：' + err.message; }
-});
+(function () {
+  var f = document.getElementById('f');
+  var msg = document.getElementById('msg');
+  var btn = document.getElementById('btn');
+  var btnTxt = document.getElementById('btnTxt');
+  var pwd = document.getElementById('p');
+  var eye = document.getElementById('eye');
+
+  // 密码可见性切换（真实功能，不是装饰）
+  eye.addEventListener('click', function () {
+    var show = pwd.type === 'password';
+    pwd.type = show ? 'text' : 'password';
+    eye.innerHTML = '<i class="ti ti-' + (show ? 'eye-off' : 'eye') + '"></i>';
+    eye.title = show ? '隐藏密码' : '显示密码';
+    pwd.focus();
+  });
+
+  function fail(t) { msg.className = 'lg-msg'; msg.textContent = t; }
+  function busy(on) {
+    btn.disabled = on;
+    btnTxt.textContent = on ? '登录中…' : '登录';
+  }
+
+  f.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    fail('');
+    var fd = new FormData(f);
+    var u = (fd.get('username') || '').trim();
+    var p = fd.get('password') || '';
+    if (!u || !p) { fail('请填写用户名和密码'); return; }
+    busy(true);
+    try {
+      var r = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u, password: p })
+      });
+      var d = {};
+      try { d = await r.json(); } catch (e2) {}
+      if (r.ok) {
+        msg.className = 'lg-msg ok';
+        msg.textContent = '登录成功，正在进入控制台…';
+        location.href = '/';
+      } else {
+        fail(d.error || d.message || ('登录失败（HTTP ' + r.status + '）'));
+        busy(false);
+      }
+    } catch (err) {
+      fail('网络错误：' + err.message);
+      busy(false);
+    }
+  });
+})();
 </script>
 </body>
 </html>

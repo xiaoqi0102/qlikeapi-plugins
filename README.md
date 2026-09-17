@@ -128,6 +128,7 @@ curl -s localhost:18673/healthz     # {"ok":true,...}
 
 <div align="center">
 
+![登录](docs/images/8-login.jpg)
 ![概览](docs/images/1-overview-light.jpg)
 *概览：KPI、用量曲线、渠道健康*
 
@@ -246,6 +247,7 @@ make test && make lint
 | [docs/API.md](docs/API.md) | HTTP 接口手册（统一入口 / 控制台 API / 错误码） |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | 全部环境变量、令牌、价格与余额取数配置 |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker 部署、反代、接入 New API、备份升级回滚 |
+| [docs/SMART-ROUTING-PLAN.md](docs/SMART-ROUTING-PLAN.md) | 智能路由与负载/并发控制调研（New API / Sub2API）+ 整合规划 |
 | [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) | UI 设计规范：设计变量、组件库清单、交互约定、变更流程与坑清单 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 已做 / 计划 / **明确不做**（含理由） |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
