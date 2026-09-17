@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · qlikeapi-plugins</title>
+<link rel="stylesheet" href="/static/vendor/bootstrap.min.css">
+<link rel="stylesheet" href="/static/vendor/bootstrap-icons.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <form class="login-card" id="f">
+    <div class="logo-lg"><i class="bi bi-shuffle"></i></div>
+    <h1>qlikeapi-plugins</h1>
+    <div class="sub">图片协议转换网关 · 控制台</div>
+
+    <div class="mb-3">
+      <label class="form-label">用户名</label>
+      <div class="input-group">
+        <span class="input-group-text bg-white"><i class="bi bi-person"></i></span>
+        <input class="form-control" name="username" autocomplete="username" placeholder="请输入用户名" required autofocus>
+      </div>
+    </div>
+    <div class="mb-4">
+      <label class="form-label">密码</label>
+      <div class="input-group">
+        <span class="input-group-text bg-white"><i class="bi bi-shield-lock"></i></span>
+        <input class="form-control" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+      </div>
+    </div>
+
+    <button class="btn btn-primary w-100 justify-content-center py-2" type="submit">
+      <i class="bi bi-box-arrow-in-right"></i> 登 录
+    </button>
+    <div class="hint mt-3 mb-0" id="msg" style="min-height:18px"></div>
+  </form>
+</div>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('msg');
+  msg.className = 'hint mt-3 mb-0';
+  msg.textContent = '';
+  const fd = new FormData(e.target);
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username: fd.get('username'), password: fd.get('password')})
+    });
+    const d = await r.json();
+    if (r.ok) location.href = '/';
+    else { msg.style.color = '#dc2626'; msg.textContent = d.error || '登录失败'; }
+  } catch (err) { msg.style.color = '#dc2626'; msg.textContent = '网络错误：' + err.message; }
+});
+</script>
+</body>
+</html>

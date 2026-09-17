@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qlikeapi-plugins 控制台 · 图片协议转换网关</title>
+<link rel="stylesheet" href="/static/vendor/bootstrap.min.css">
+<link rel="stylesheet" href="/static/vendor/bootstrap-icons.css">
+<link rel="stylesheet" href="/static/vendor/tabler-icons/tabler-icons.min.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="bar"></div>
+<div class="layout">
+  <aside class="side" id="side">
+    <div class="brand">
+      <span class="logo"><i class="ti ti-arrows-shuffle"></i></span>
+      <span>qlikeapi-plugins<small>图片协议转换网关</small></span>
+    </div>
+    <nav class="nav" id="nav">
+      <a class="item on" href="#overview" data-v="overview"><i class="ti ti-gauge"></i>概览</a>
+      <a class="item" href="#usage" data-v="usage"><i class="ti ti-trending-up"></i>用量统计</a>
+      <a class="item" href="#providers" data-v="providers"><i class="ti ti-plug"></i>渠道实例</a>
+      <a class="item" href="#models" data-v="models"><i class="ti ti-sitemap"></i>模型目录</a>
+      <a class="item" href="#tokens" data-v="tokens"><i class="ti ti-key"></i>访问令牌</a>
+      <a class="item" href="#plugins" data-v="plugins"><i class="ti ti-puzzle"></i>渠道插件</a>
+      <a class="item" href="#logs" data-v="logs"><i class="ti ti-notebook"></i>请求日志</a>
+      <a class="item" href="#jobs" data-v="jobs"><i class="ti ti-hourglass"></i>异步任务</a>
+      <a class="item" href="#balances" data-v="balances"><i class="ti ti-wallet"></i>站点余额</a>
+      <div class="sep">系统</div>
+      <a class="item" href="#settings" data-v="settings"><i class="ti ti-settings"></i>设置</a>
+    </nav>
+    <div class="foot">
+      <div><span class="ver"><i class="ti ti-activity"></i> v<span id="verTag">…</span></span>
+        <span class="ver" id="encTag" title="上游密钥加密状态"><i class="ti ti-shield-lock"></i> …</span></div>
+      <div class="mono" id="pluginTag"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h2 id="title">概览</h2>
+        <div class="sub" id="subtitle">图片协议转换网关 · 标准 OpenAI 图片接口 ⇄ 各上游真实协议</div>
+      </div>
+      <div class="who">
+        <button class="btn btn-sm btn-outline-secondary side-toggle" onclick="document.getElementById('side').classList.toggle('open')"><i class="ti ti-list"></i></button>
+        <button class="btn btn-sm btn-outline-secondary" id="autoBtn" onclick="act.toggleAuto()"><i class="ti ti-player-pause"></i> 暂停刷新</button>
+        <button class="btn btn-sm btn-outline-secondary" id="themeBtn" onclick="act.themeToggle()" title="浅色 / 深色切换"><i class="ti ti-moon"></i></button>
+        <span class="pill"><i class="ti ti-user-circle"></i> <span id="who">…</span></span>
+        <button class="btn btn-sm btn-outline-secondary" onclick="act.logout()"><i class="ti ti-logout"></i> 退出</button>
+      </div>
+    </div>
+
+    <!-- ================= 概览 ================= -->
+    <section id="v-overview">
+      <div class="cards" id="kpis"></div>
+
+      <div class="panel">
+        <header>
+          <h3><i class="ti ti-trending-up"></i>调用趋势 <span class="hint" id="chartHint"></span></h3>
+          <div class="acts">
+            <div class="btn-group btn-group-sm" role="group">
+              <button class="btn btn-outline-secondary" onclick="act.setTrend('hourly')">24 小时</button>
+              <button class="btn btn-outline-secondary" onclick="act.setTrend('series')">7 天</button>
+            </div>
+          </div>
+        </header>
+        <div class="body"><div id="chart" class="chart-box" style="height:220px"></div></div>
+      </div>
+
+      <div class="grid2">
+        <div class="panel">
+          <header><h3><i class="ti ti-chart-bar"></i>渠道用量</h3></header>
+          <div class="body tight" id="providerUsage"></div>
+        </div>
+        <div class="panel">
+          <header><h3><i class="ti ti-cpu"></i>模型用量 Top</h3></header>
+          <div class="body tight" id="modelUsage"></div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="panel">
+          <header>
+            <h3><i class="ti ti-heartbeat"></i>渠道健康度</h3>
+            <button class="btn btn-sm btn-primary" onclick="act.healthRun(this)"><i class="ti ti-broadcast"></i> 全部探活</button>
+          </header>
+          <div class="body tight" id="health"></div>
+        </div>
+        <div class="panel">
+          <header><h3><i class="ti ti-alert-triangle"></i>最近错误</h3></header>
+          <div class="body tight" id="errs"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 用量统计 ================= -->
+    <section id="v-usage" hidden>
+      <div class="cards" id="usageKpis"></div>
+      <div class="panel">
+        <header>
+          <h3><i class="ti ti-activity"></i>用量趋势 <span class="hint" id="usageHint"></span></h3>
+          <div class="acts">
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-outline-secondary" onclick="act.setUsageMetric('requests')">请求量</button>
+              <button class="btn btn-outline-secondary" onclick="act.setUsageMetric('images')">图片张数</button>
+              <button class="btn btn-outline-secondary" onclick="act.setUsageMetric('cost')">费用</button>
+            </div>
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-outline-secondary" onclick="act.setUsageDays(1)">今天</button>
+              <button class="btn btn-outline-secondary" onclick="act.setUsageDays(7)">7 天</button>
+              <button class="btn btn-outline-secondary" onclick="act.setUsageDays(30)">30 天</button>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" onclick="act.exportCsv()"><i class="ti ti-download"></i> 导出 CSV</button>
+          </div>
+        </header>
+        <div class="body"><div id="usageChart" class="chart-box" style="height:220px"></div></div>
+      </div>
+
+      <div class="panel">
+        <header>
+          <h3><i class="ti ti-chart-pie"></i>维度分布</h3>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary" onclick="act.setUsageDim('token')">按令牌</button>
+            <button class="btn btn-outline-secondary" onclick="act.setUsageDim('provider')">按渠道</button>
+            <button class="btn btn-outline-secondary" onclick="act.setUsageDim('model')">按模型</button>
+            <button class="btn btn-outline-secondary" onclick="act.setUsageDim('operation')">按接口</button>
+            <button class="btn btn-outline-secondary" onclick="act.setUsageDim('kind')">按类型</button>
+          </div>
+        </header>
+        <div class="body tight" id="usageTable"></div>
+      </div>
+
+      <div class="panel">
+        <header><h3><i class="ti ti-tag"></i>模型单价（元/张，用于估算费用）</h3></header>
+        <div class="body" id="priceTable"></div>
+      </div>
+    </section>
+
+
+    <!-- ================= 渠道实例 ================= -->
+    <section id="v-providers" hidden>
+      <div class="panel">
+        <header>
+          <h3><i class="ti ti-plug"></i>渠道实例 <span class="hint">每个实例 = New API 里的一个上游渠道</span></h3>
+        </header>
+        <div class="body" id="providers"></div>
+      </div>
+      <div id="pvRoutes"></div>
+    </section>
+
+    <!-- ================= 模型目录 ================= -->
+    <section id="v-models" hidden>
+      <div class="panel">
+        <header><h3><i class="ti ti-sitemap"></i>模型目录 <span class="hint">客户端模型名 → 上游真实名</span></h3></header>
+        <div class="body" id="models"></div>
+      </div>
+    </section>
+
+    <!-- ================= 访问令牌 ================= -->
+    <section id="v-tokens" hidden>
+      <div class="cards" id="tokenKpis"></div>
+      <div class="panel">
+        <header>
+          <h3><i class="ti ti-key"></i>访问令牌 <span class="hint">每个调用方一把 key，可限额度和模型</span></h3>
+          <div class="acts">
+            <button class="btn btn-sm btn-outline-secondary" onclick="act.loadTokens()"><i class="ti ti-refresh"></i> 刷新</button>
+            <button class="btn btn-sm btn-primary" onclick="act.tokenForm()"><i class="ti ti-plus"></i> 新建令牌</button>
+          </div>
+        </header>
+        <div class="body tight" id="tokens"></div>
+      </div>
+      <div class="panel" style="box-shadow:none;border-style:dashed">
+        <header style="border-bottom:0;padding-bottom:4px"><h3><i class="ti ti-info-circle"></i>说明</h3></header>
+        <div class="body tight" id="tokenNote"></div>
+      </div>
+    </section>
+
+    <!-- ================= 渠道插件 ================= -->
+    <section id="v-plugins" hidden>
+      <div class="panel">
+        <header>
+          <h3><i class="ti ti-puzzle"></i>渠道插件 <span class="hint">放一个 .py 到 app/channels/ 就是一个新渠道</span></h3>
+          <div class="acts">
+            <button class="btn btn-sm btn-outline-secondary" onclick="act.showTemplate()"><i class="ti ti-file-code"></i> 查看模板</button>
+            <button class="btn btn-sm btn-primary" onclick="act.reloadPlugins(this)"><i class="ti ti-refresh"></i> 重载插件</button>
+          </div>
+        </header>
+        <div class="body tight" id="plugins"></div>
+      </div>
+    </section>
+
+    <!-- ================= 请求日志 ================= -->
+    <section id="v-logs" hidden>
+      <div class="panel">
+        <header>
+          <h3><i class="ti ti-notebook"></i>请求日志</h3>
+          <div class="acts">
+            <select class="form-select form-select-sm" id="logProvider" style="width:170px" onchange="act.loadLogs()"><option value="">全部渠道</option></select>
+            <select class="form-select form-select-sm" id="logStatus" style="width:130px" onchange="act.loadLogs()">
+              <option value="">全部状态</option><option value="ok">成功</option><option value="err">失败</option>
+            </select>
+            <select class="form-select form-select-sm" id="logToken" style="width:150px" onchange="act.loadLogs()"><option value="">全部令牌</option></select>
+            <select class="form-select form-select-sm" id="logKind" style="width:150px" onchange="act.loadLogs()">
+              <option value="">全部类型</option><option value="relay">转发</option>
+              <option value="client">本地校验</option><option value="probe">探活</option>
+            </select>
+            <input class="form-control form-control-sm" id="logQ" placeholder="搜索模型 / 错误 / 路径" style="width:200px" onkeydown="if(event.key==='Enter')act.loadLogs()">
+            <button class="btn btn-sm btn-outline-secondary" onclick="act.loadLogs()"><i class="ti ti-search"></i> 查询</button>
+          </div>
+        </header>
+        <div class="body tight" id="logs"></div>
+      </div>
+    </section>
+
+    <!-- ================= 异步任务 ================= -->
+    <section id="v-jobs" hidden>
+      <div class="panel">
+        <header>
+          <h3><i class="ti ti-hourglass"></i>fal 异步任务</h3>
+          <button class="btn btn-sm btn-outline-secondary" onclick="act.loadJobs()"><i class="ti ti-refresh"></i> 刷新</button>
+        </header>
+        <div class="body tight" id="jobs"></div>
+      </div>
+    </section>
+
+    <!-- ================= 站点余额 ================= -->
+    <section id="v-balances" hidden>
+      <div class="cards" id="balanceKpis"></div>
+      <div class="panel">
+        <header>
+          <h3><i class="ti ti-wallet"></i>站点余额 <span class="hint">全部为只读查询</span></h3>
+          <div class="acts">
+            <button class="btn btn-sm btn-outline-secondary" onclick="act.importSites(this)"><i class="ti ti-file-import"></i> 从 .env 导入</button>
+            <button class="btn btn-sm btn-primary" onclick="act.checkAllSites(this)"><i class="ti ti-repeat"></i> 全部刷新</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="act.siteForm()"><i class="ti ti-plus"></i> 新增站点</button>
+          </div>
+        </header>
+        <div class="body tight" id="sites"></div>
+      </div>
+      <div class="panel">
+        <header><h3><i class="ti ti-info-circle"></i>取数器说明</h3></header>
+        <div class="body">
+          <p class="hint mb-2">内置：<span class="chip mono">newapi</span> <code>/api/user/self</code>＋<code>New-Api-User</code>、
+            <span class="chip mono">sub2api</span> <code>/v1/usage</code>（change2pro 就是这一系）、
+            <span class="chip mono">deepseek</span>、<span class="chip mono">siliconflow</span>、
+            <span class="chip mono">openai_billing</span>、<span class="chip mono">custom</span>（自填 URL/请求头/JSON 路径）、
+            <span class="chip mono">manual</span>（手工记账）。</p>
+          <p class="hint mb-0">低余额预警：编辑站点 → extra 填 <code>{"threshold": 5}</code>；手工记账：<code>{"manual_balance": 88.5, "unit": "CNY"}</code>。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 设置 ================= -->
+    <section id="v-settings" hidden>
+      <div class="grid2">
+        <div class="panel">
+          <header><h3><i class="ti ti-key"></i>修改密码</h3></header>
+          <div class="body">
+            <div class="mb-3"><label class="form-label">原密码</label><input id="pwOld" type="password" class="form-control"></div>
+            <div class="mb-3"><label class="form-label">新密码（至少 6 位）</label><input id="pwNew" type="password" class="form-control"></div>
+            <button class="btn btn-primary" onclick="act.changePw()">保存</button>
+          </div>
+        </div>
+        <div class="panel">
+          <header><h3><i class="ti ti-info-square"></i>运行信息</h3></header>
+          <div class="body" id="sysinfo"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- 弹窗 -->
+<div class="modal fade" id="modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title" id="mTitle">标题</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body" id="mBody"></div>
+      <div class="modal-footer" id="mFoot"></div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="/static/vendor/bootstrap.bundle.min.js"></script>
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+# ============================================================================
+#  docker-compose 示例（复制成 docker-compose.yml 后按需改）
+#    cp docker-compose.example.yml docker-compose.yml
+#    cp .env.example .env && vim .env
+#    docker compose up -d --build
+#
+#  为什么仓库里是 example？真实的 docker-compose.yml 里有密钥，
+#  已被 .gitignore 排除，永不入库。
+# ============================================================================
+name: qlikeapi-plugins
+
+services:
+  qlikeapi-plugins:
+    build: .
+    image: qlikeapi-plugins:latest
+    container_name: qlikeapi-plugins
+    restart: unless-stopped
+
+    # 所有密钥/开关走 .env（见 .env.example）
+    env_file:
+      - .env
+    environment:
+      QLIKEAPI_DB: /data/qlikeapi.db
+
+    volumes:
+      # SQLite 落盘目录 —— 唯一需要持久化的东西（渠道/密钥/日志/令牌都在里面）
+      - ./data:/data
+      # 可选：把宿主机的 .env 只读挂进来，控制台就能「一键导入已配置好的站点」
+      # - /opt/hermes/.env:/env/hermes.env:ro
+
+    ports:
+      # 只监听本机 127.0.0.1：对外一律走 Nginx/Traefik 反代 + HTTPS
+      - "127.0.0.1:18673:18673"
+
+# ---------------------------------------------------------------------------
+# 如果 New API 跑在同一个 docker 网络里（容器名互访），改成外部网络：
+#
+# networks:
+#   default:
+#     name: 1panel-network
+#     external: true
+# ---------------------------------------------------------------------------

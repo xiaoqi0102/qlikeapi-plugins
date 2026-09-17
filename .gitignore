@@ -1,0 +1,32 @@
+# ===== 运行时数据 / 密钥（绝不入库）=====
+data/
+*.db
+*.db.bak-*
+*.sqlite3
+.up_token
+.env
+docker-compose.yml
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ===== 编辑器 / 系统 =====
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ===== 构建产物 =====
+dist/
+build/
+*.tar.gz

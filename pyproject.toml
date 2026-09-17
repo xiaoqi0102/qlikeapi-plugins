@@ -1,0 +1,49 @@
+# ============================================================================
+#  qlikeapi-plugins —— 工程配置（lint / 测试 / 覆盖率）
+#  这个文件是「开发规范」的可执行版本：CI 与本地 make check 都读它。
+# ============================================================================
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+exclude = ["app/static/vendor", "data", ".venv"]
+
+[tool.ruff.lint]
+# E/W 基础错误与告警 · F 未使用/未定义 · I import 排序 · UP 语法现代化 · B 常见 bug
+select = ["E", "W", "F", "I", "UP", "B"]
+ignore = [
+    "UP031",   # 现有代码统一用 % 风格日志格式化，不强制改 f-string
+  "E501",  # 行宽交给 formatter 判断，硬性 140 已在上方限制
+  "B008",  # FastAPI 依赖注入惯用写法（函数调用作默认值）
+  "UP038", # 兼容旧运行时的 isinstance 写法
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 插件目录：插件需要在 import 期做注册，禁止「未使用导入」类误报
+"app/channels/_template.py" = ["F401", "B018"]
+"scripts/*" = ["E402", "F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+  "network: 需要联网的用例（默认不跑，CI 里跳过）",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/static/*", "app/channels/_template.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+  "pragma: no cover",
+  "if __name__ == .__main__.:",
+  "raise NotImplementedError",
+]

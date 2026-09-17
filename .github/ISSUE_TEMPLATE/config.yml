@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题（请勿开公开 issue）
+    url: https://github.com/xiaoqi0102/qlikeapi-plugins/security/advisories/new
+    about: 漏洞请走私密渠道，见 SECURITY.md
+  - name: 使用与部署问题
+    url: https://github.com/xiaoqi0102/qlikeapi-plugins/blob/main/docs/DEPLOYMENT.md
+    about: 先看部署文档与「常见故障」一节
+  - name: 想加一个新上游
+    url: https://github.com/xiaoqi0102/qlikeapi-plugins/blob/main/docs/CHANNEL-PLUGINS.md
+    about: 渠道插件开发指南（含完整示例）

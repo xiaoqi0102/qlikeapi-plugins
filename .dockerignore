@@ -1,0 +1,21 @@
+# 构建镜像时不需要的东西
+data/
+*.db
+*.db.bak-*
+.up_token
+.env
+docker-compose.yml
+tests/
+docs/
+.github/
+.git/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+.idea/
+.vscode/
+*.md
+!app/**/*.md

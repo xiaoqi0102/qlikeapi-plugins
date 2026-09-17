@@ -1,0 +1,80 @@
+name: Bug 报告
+description: 报告一个可复现的缺陷
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请**不要粘贴任何真实 API key、令牌、密码或含凭据的截图**，
+        需要复现时用 `sk-xxxx` 之类的占位符。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 现象
+      description: 发生了什么？期望是什么？
+      placeholder: |
+        实际：调用 /v1/images/generations 返回 503 …
+        期望：应该走第二个渠道并成功
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 越具体越好；能贴命令/请求体（脱敏后）最好
+      placeholder: |
+        1. 建一个 xxx 插件渠道，模型映射 yyy
+        2. curl -X POST .../v1/images/generations -d '{"model":"…","prompt":"…"}'
+        3. 看到 …
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 控制台页脚或 `GET /healthz` 里的 version
+      placeholder: "3.3.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: 部署方式
+      options:
+        - Docker Compose（官方示例）
+        - Docker（自建 compose / 命令行）
+        - 本机直接跑（make run / uvicorn）
+        - 其它（在补充说明里写）
+    validations:
+      required: true
+
+  - type: input
+    id: channel
+    attributes:
+      label: 相关渠道插件与上游类型
+      description: 例如 `change2pro`（Gemini 原生 + OpenAI 图片合并）、`fal_queue`（异步队列）
+      placeholder: "change2pro / fal_queue / openai_images / 自写插件"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志与响应
+      description: 控制台「请求日志」里的详情（含每次尝试的状态码）、容器日志相关片段
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 我已确认内容里没有任何真实密钥/令牌/密码
+          required: true
+        - label: 我已搜索过现有 issue，没有重复
+          required: true
