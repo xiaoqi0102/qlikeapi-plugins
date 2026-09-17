@@ -8,7 +8,7 @@ VENV  ?= .venv
 PORT  ?= 18673
 
 .DEFAULT_GOAL := help
-.PHONY: help install run test test-cov lint fmt check verify docker-build up down logs restart backup clean
+.PHONY: help install run test test-cov lint fmt check verify ui-diff docker-build up down logs restart backup clean
 
 help: ## 显示所有可用命令
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -37,6 +37,9 @@ check: lint test ## 提交前必跑：lint + 测试
 
 verify: ## 零成本验收：本地校验 / dry-run / 抹 prompt 探活（不打真实出图）
 	$(PY) scripts/verify_v3.py
+
+ui-diff: ## 新旧样式 A/B 计算样式比对（需 playwright + chromium；期望「合计差异: 0」）
+	$(PY) scripts/ui_style_diff.py
 
 docker-build: ## 构建镜像
 	docker build -t qlikeapi-plugins:latest .

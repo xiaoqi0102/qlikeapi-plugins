@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>qlikeapi-plugins 控制台 · 图片协议转换网关</title>
 <link rel="stylesheet" href="/static/vendor/bootstrap.min.css">
-<link rel="stylesheet" href="/static/vendor/bootstrap-icons.css">
 <link rel="stylesheet" href="/static/vendor/tabler-icons/tabler-icons.min.css">
-<link rel="stylesheet" href="/static/style.css">
+<!-- 设计变量 + 通用组件库（规范见 docs/DESIGN-SYSTEM.md，展示页 /ui-kit） -->
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/ui-kit.css">
 </head>
 <body>
 <div id="bar"></div>
@@ -267,6 +268,19 @@
           <header><h3><i class="ti ti-info-square"></i>运行信息</h3></header>
           <div class="body" id="sysinfo"></div>
         </div>
+        <div class="panel">
+          <header><h3><i class="ti ti-palette"></i>界面规范与组件库</h3></header>
+          <div class="body">
+            <div class="hint">全站配色、间距、组件与交互约定见 <code class="mono">docs/DESIGN-SYSTEM.md</code>；
+              通用组件（吐司 / 弹窗 / 确认框 / 徽章 / 表格 / 骨架屏 / 多选选择器）都在
+              <code class="mono">static/css/ui-kit.css</code> + <code class="mono">static/js/ui-kit.js</code>，改版请复用不要另起一套。</div>
+            <div class="d-flex gap-2 mt-3">
+              <a class="btn btn-sm btn-primary" href="/ui-kit" target="_blank" rel="noopener"><i class="ti ti-components"></i> 打开组件展示页</a>
+              <a class="btn btn-sm btn-outline-secondary" href="https://github.com/xiaoqi0102/qlikeapi-plugins/blob/main/docs/DESIGN-SYSTEM.md"
+                 target="_blank" rel="noopener"><i class="ti ti-file-text"></i> 查看设计规范</a>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -287,6 +301,7 @@
 
 <script src="/static/vendor/bootstrap.bundle.min.js"></script>
 <script src="/static/vendor/chart.umd.min.js"></script>
-<script src="/static/app.js"></script>
+<script src="/static/js/ui-kit.js"></script>
+<script src="/static/js/app.js"></script>
 </body>
 </html>

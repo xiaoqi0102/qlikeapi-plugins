@@ -122,6 +122,8 @@ git diff --cached | grep -iE "sk-|token|password|secret"   # 提交前扫一眼
 - [ ] 没有真实密钥、没有 `data/`、没有部署文件
 - [ ] 对外行为/接口有变化时，同步更新 `README` / `docs/` / `CHANGELOG.md`（`Unreleased` 段）
 - [ ] 涉及渠道插件、路由、探活的改动：确认零成本铁律没有被破坏
+- [ ] 涉及控制台 UI 的改动：按 [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md) 用现成组件，
+      并跑 `make ui-diff` 确认「合计差异: 0」（截图前记得脱敏）
 - [ ] PR 描述里写清：**改了什么、为什么、怎么验证的**（贴命令和输出）
 
 小改动可以走直推，但同样要满足上面这些；**破坏性变更**（数据结构、接口形状）必须先开

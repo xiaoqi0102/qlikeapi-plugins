@@ -11,6 +11,38 @@
 - 价格页支持批量导入/导出（CSV）
 - 渠道实例分组与标签筛选
 
+## [3.4.0] - 2026-09-17
+
+控制台可用性三改 + 可复用组件库 + 设计规范。
+
+### Added
+- **组件库**：`app/static/js/ui-kit.js`（`window.UI.*`：`toast` / `confirm` / `modal` / `picker` /
+  `busy` / `bar` / `copy`，无依赖、零构建）+ `app/static/css/tokens.css`（设计变量）+
+  `app/static/css/ui-kit.css`（组件样式）。历史样式**按原顺序**迁入，不改变任何视觉表现。
+- **组件展示页 `GET /ui-kit`**：每个组件都能真点（多选选择器、确认框、吐司、进度条、弹窗、表格）。
+- **设计规范** [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md)：设计变量、组件清单、交互与文案约定、
+  变更流程、坑清单（含本次踩到的 CSS 顺序翻转与截图脱敏）。
+- **接口** `GET /api/meta/options`：返回模型与渠道选项（含每个模型的可用渠道数），供控制台下拉多选使用。
+- **脚本** `scripts/ui_style_diff.py`（`make ui-diff`）：同一页面状态下 A/B 切换新旧样式表，
+  逐元素比对计算样式，验证 CSS 重构零回归。
+
+### Changed
+- 访问令牌弹窗：「允许的模型 / 允许的渠道」由逗号分隔文本框改为**下拉多选选择器**
+  （搜索、全选、清空、已选计数）。
+- 站点余额页：每行操作按钮改为**横向一排**（`.acts`）。
+- 前端目录整理：`static/app.js` → `static/js/app.js`；`static/style.css` 拆为
+  `static/css/tokens.css` + `static/css/ui-kit.css`；登录页重写。
+- 原生 `confirm()` 统一替换为组件库的 `UI.confirm`（可键盘关闭、有焦点管理）。
+- 测试 199 → **208** 个用例（新增 `/api/meta/options` 用例、`tests/test_static.py` 静态检查：
+  `onclick` 反斜杠、内联脚本 `node --check`、页面引用完整性）。
+
+### Fixed
+- 组件展示页内联脚本语法错误：HTML 拼在 JS 单引号字符串里时 `\'` 会**原样进入属性**，浏览器按 JS 解析
+  直接报 `SyntaxError`，整块脚本失效（所有演示按钮点了没反应，只有控制台能看到）。改用 HTML 实体
+  `&#39;`，并新增 `tests/test_static.py`（`node --check` 内联脚本 + `onclick` 反斜杠检查）兜底。
+- CSS 拆分时合并重复规则导致 `.side-toggle` 在桌面端露出：改为**完全保序拆分**，
+  并用**提升特异性**（而非依赖书写顺序）加固折叠按钮显隐；新增 A/B 计算样式比对兜底。
+
 ## [3.3.0] - 2026-09-17
 
 控制台二次升级 + 探活安全修复 + 测试体系落地。

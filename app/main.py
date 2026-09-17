@@ -32,7 +32,7 @@ from . import admin, channels, relay, store
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 
-app = FastAPI(title="qlikeapi-plugins", version="3.3.0")
+app = FastAPI(title="qlikeapi-plugins", version="3.4.0")
 app.include_router(relay.router, prefix="/up", tags=["upstream"])
 app.include_router(relay.router_v1, prefix="/v1", tags=["router"])   # 统一入口：New API 只挂这一个渠道
 app.include_router(admin.router, tags=["admin"])
@@ -74,6 +74,18 @@ def login_page(request: Request):
     if admin.current_user(request):
         return RedirectResponse("/", status_code=302)
     with open(os.path.join(STATIC_DIR, "login.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/ui-kit", response_class=HTMLResponse)
+def ui_kit_page(request: Request):
+    """组件展示页（样式指南）：通用组件的实时预览 + 用法片段。
+
+    只做预览，不读数据库、不调上游；未登录跳登录页（与首页一致）。
+    """
+    if not admin.current_user(request):
+        return RedirectResponse("/login", status_code=302)
+    with open(os.path.join(STATIC_DIR, "ui-kit.html"), encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 

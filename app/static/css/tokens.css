@@ -1,0 +1,36 @@
+/* tokens.css —— qlikeapi-plugins 设计变量（唯一来源）
+ *
+ * 只放变量：颜色、圆角、阴影、字号、间距、动效时长。
+ * 深色模式只覆盖变量值（body.dark），组件 CSS 里禁止写死颜色。
+ * 规范：docs/DESIGN-SYSTEM.md ｜ 预览：/ui-kit
+ */
+
+:root{
+  --sidebar-w: 232px;
+  --ink:#0f172a; --ink-2:#334155; --muted:#64748b; --line:#e6ebf2; --bg:#f5f7fb;
+  --brand:#2f6bff; --brand-2:#1d4ed8; --ok:#16a34a; --warn:#d97706; --err:#dc2626;
+  --nav:#0f172a; --nav-ink:#94a3b8;
+  --radius:.75rem;
+  --card-shadow:0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.12);
+}
+
+:root{
+  --r-xs:6px; --r-sm:9px; --r:12px; --r-lg:16px;
+  --sh-1:0 1px 2px rgba(15,23,42,.05);
+  --sh-2:0 1px 2px rgba(15,23,42,.05), 0 6px 18px -10px rgba(15,23,42,.14);
+  --sh-3:0 2px 4px rgba(15,23,42,.06), 0 18px 40px -18px rgba(15,23,42,.20);
+  --ring:0 0 0 3px rgba(47,107,255,.22);
+  --brand-soft:#eef3ff; --ok-soft:#e9f8ef; --warn-soft:#fdf4e6; --err-soft:#fdeeee;
+  --line-2:#eef1f6;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+}
+
+body.dark{
+  --bg:#0d1421; --ink:#e8edf5; --ink-2:#c2cbd9; --muted:#8494a8; --line:#243044; --line-2:#1e293b;
+  --nav:#0a111e; --nav-ink:#8fa0b8;
+  --brand-soft:#16243c; --ok-soft:#12271d; --warn-soft:#2a2312; --err-soft:#2b1719;
+  --sh-1:0 1px 2px rgba(0,0,0,.40);
+  --sh-2:0 1px 3px rgba(0,0,0,.45), 0 8px 22px -12px rgba(0,0,0,.70);
+  --sh-3:0 2px 6px rgba(0,0,0,.50), 0 22px 48px -20px rgba(0,0,0,.80);
+  --ring:0 0 0 3px rgba(47,107,255,.32);
+}

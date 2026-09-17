@@ -27,9 +27,48 @@ def test_index_shows_login_when_anonymous(client):
 
 def test_static_serves_local_vendor_assets(client):
     """前端库必须本地自托管（离线/内网也能开控制台）。"""
-    for path in ("/static/vendor/tabler-icons/tabler-icons.min.css",
-                 "/static/app.js", "/static/style.css"):
+    for path in ("/static/vendor/bootstrap.min.css",
+                 "/static/vendor/tabler-icons/tabler-icons.min.css",
+                 "/static/vendor/chart.umd.min.js"):
         assert client.get(path).status_code == 200, path
+
+
+def test_component_library_is_served(client):
+    """设计变量 + 组件库 + 组件展示页：全部是静态文件，不走后端逻辑。"""
+    for path in ("/static/css/tokens.css", "/static/css/ui-kit.css",
+                 "/static/js/ui-kit.js", "/static/js/app.js"):
+        assert client.get(path).status_code == 200, path
+    # 旧的单文件样式已并入组件库，不应再存在（避免两套样式并存）
+    assert client.get("/static/style.css").status_code == 404
+
+
+def test_ui_kit_showcase_page_requires_login(client, login):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    anon = TestClient(app)
+    r = anon.get("/ui-kit", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/login"
+    ok = client.get("/ui-kit")
+    assert ok.status_code == 200 and "组件库" in ok.text
+
+
+def test_meta_options_feeds_the_pickers(client, login, make_provider):
+    """令牌弹窗的候选集：模型 + 渠道（多选控件用，只读、不打上游）。"""
+    make_provider(key="p1", model_map={"gpt-image-2": "openai/gpt-image-2"})
+    r = client.get("/api/meta/options")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["currencies"] == ["CNY", "USD"]
+    # aliased=True 表示「对外模型名 ≠ 上游模型名」（模型目录里要标出来）
+    assert d["models"] == [{"id": "gpt-image-2", "providers": ["p1"], "aliased": True}]
+    p = d["providers"][0]
+    assert p["key"] == "p1" and p["label"] and p["models"] == ["gpt-image-2"]
+
+
+def test_meta_options_requires_login(client):
+    assert client.get("/api/meta/options").status_code == 401
 
 
 def test_static_path_traversal_blocked(client):

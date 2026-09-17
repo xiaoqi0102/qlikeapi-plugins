@@ -1,19 +1,13 @@
-/* app.js —— qlikeapi-plugins 控制台前端
-   技术栈：原生 JS + Bootstrap 5.3（弹窗/提示/表单）+ Chart.js（图表），全部本地自托管 */
-const $ = (s) => document.querySelector(s);
-const $$ = (s) => document.querySelectorAll(s);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const fmtTime = (ts) => ts ? new Date(ts * 1000).toLocaleString('zh-CN', {hour12:false}) : '—';
-const timeAgo = (ts) => {
-  const d = Math.max(0, Date.now() / 1000 - ts);
-  if (d < 60) return '刚刚';
-  if (d < 3600) return Math.floor(d / 60) + ' 分钟前';
-  if (d < 86400) return Math.floor(d / 3600) + ' 小时前';
-  return Math.floor(d / 86400) + ' 天前';
-};
-const fmtMs = (v) => v == null ? '—' : (v >= 1000 ? (v/1000).toFixed(1)+'s' : Math.round(v)+'ms');
-const cur = (u) => (u === 'CNY' ? '¥' : '$');
-const money = (v, u) => (v == null ? '—' : cur(u) + Number(v).toFixed(2));
+/* app.js —— qlikeapi-plugins 控制台前端（业务层）
+ *
+ * 通用 UI（吐司/弹窗/确认框/徽章/表格/骨架屏/多选选择器）全部来自组件库
+ *   /static/js/ui-kit.js  →  window.UI.*
+ *   /static/css/tokens.css + /static/css/ui-kit.css
+ * 本文件只写业务：数据加载、渲染组装、动作处理。规范见 docs/DESIGN-SYSTEM.md，
+ * 组件展示页 /ui-kit。改样式前先看规范，不要在业务里写行内样式。
+ */
+const $ = UI.$, $$ = UI.$$, esc = UI.esc, fmtTime = UI.fmtTime, timeAgo = UI.timeAgo,
+      fmtMs = UI.fmtMs, cur = UI.cur, money = UI.money;
 
 const state = {plugins: [], providers: [], siteTypes: [], sites: [], tokens: [],
                trend: 'hourly', auto: true, view: 'overview',
@@ -22,11 +16,7 @@ const state = {plugins: [], providers: [], siteTypes: [], sites: [], tokens: [],
                charts: {}};
 
 /* ---------------- 基础通讯 ---------------- */
-let _busy = 0;
-function busy(on) {
-  _busy = Math.max(0, _busy + (on ? 1 : -1));
-  document.body.classList.toggle('busy', _busy > 0);
-}
+const busy = UI.busy;                          // 顶部进度条（组件库，可重入）
 
 async function api(path, opts = {}) {
   busy(true);                                     // 顶部进度条：请求期间可见
@@ -43,39 +33,10 @@ async function api(path, opts = {}) {
   } finally { busy(false); }
 }
 
-function toast(msg, bad) {
-  const d = document.createElement('div');
-  d.className = 't' + (bad ? ' err' : '');
-  d.innerHTML = `<i class="ti ${bad ? 'ti-alert-octagon' : 'ti-circle-check'}"></i><span>${esc(msg)}</span>`;
-  $('#toast').appendChild(d);
-  setTimeout(() => d.remove(), 3800);
-}
+const toast = UI.toast;
 
-let _modal = null;
-function modal(title, bodyHTML, footHTML) {
-  $('#mTitle').textContent = title;
-  $('#mBody').innerHTML = bodyHTML;
-  $('#mFoot').innerHTML = footHTML || '<button class="btn btn-outline-secondary" data-bs-dismiss="modal">关闭</button>';
-  _modal = _modal || new bootstrap.Modal($('#modal'));
-  _modal.show();
-}
-const closeModal = () => _modal && _modal.hide();
-function copyText(text) {
-  // https / localhost 走标准剪贴板；http 场景回退到 execCommand，避免按钮点了没反应
-  const fallback = () => {
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text; ta.setAttribute('readonly', '');
-      ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
-      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
-      const ok = document.execCommand('copy'); ta.remove();
-      ok ? toast('已复制到剪贴板') : toast('复制失败：请手动选中复制', true);
-    } catch (e) { toast('复制失败：请手动选中复制', true); }
-  };
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(() => toast('已复制到剪贴板'), fallback);
-  } else fallback();
-}
+// 弹窗 / 关闭 / 复制：组件库实现（modal 第 4 个参数是「显示后回调」，挂载 UI.picker 用）
+const modal = UI.modal, closeModal = UI.closeModal, copyText = UI.copy;
 
 /* ---------------- 图表 ---------------- */
 const PALETTE = {requests:'#2f6bff', images:'#8b5cf6', cost:'#0ea5e9'};
@@ -164,9 +125,9 @@ function show(view) {
 window.addEventListener('hashchange', () => show(location.hash.slice(1) || 'overview'));
 
 const MODE = {native:['info','原生透传'], converted:['warn','本服务翻译'], queue:['info','异步队列'], unsupported:['err','不支持']};
-const pill = (cls, text, icon) => `<span class="pill ${cls}">${icon ? `<i class="ti ${icon}"></i>` : ''}${esc(text)}</span>`;
+const pill = UI.pill;
 const ratePill = (rate, n) => n ? pill(rate >= 99 ? 'ok' : rate >= 90 ? 'warn' : 'err', rate + '%') : '<span class="pill">—</span>';
-const emptyBox = (text, icon = 'ti-inbox') => `<div class="empty"><i class="ti ${icon}"></i>${esc(text)}</div>`;
+const emptyBox = UI.empty;
 
 /* ================================================================= 动作 */
 const act = {
@@ -321,7 +282,7 @@ const act = {
   },
 
   async delPrice(id) {
-    if (!confirm('删除这条单价？')) return;
+    if (!(await UI.confirm('删除这条单价？', {okText: '删除'}))) return;
     await api('/api/prices/' + id, {method:'DELETE'});
     toast('已删除'); act.loadUsage();
   },
@@ -333,6 +294,7 @@ const act = {
     const r = await api('/api/providers');
     if (!r) return;
     state.providers = r.data;
+    state._metaOpts = null;                 // 渠道/模型可能变了，令牌弹窗的候选集重新拉
     const opt = $('#logProvider');
     if (opt) opt.innerHTML = '<option value="">全部渠道</option>' + state.providers.map(p => `<option>${esc(p.key)}</option>`).join('');
     if (!state.pv) state.pv = {q: '', f: '', open: {}, sel: {}};
@@ -384,7 +346,7 @@ const act = {
   async batchDelete() {
     const keys = Object.keys(state.pvSel || {}).filter(k => state.pvSel[k]);
     if (!keys.length) return;
-    if (!confirm(`确认删除这 ${keys.length} 个渠道实例？\n\n${keys.join('、')}\n\n删除后 New API 里走这些实例的请求会失败，密钥池也一并删除。`)) return;
+    if (!(await UI.confirm(`确认删除这 ${keys.length} 个渠道实例？${keys.join('、')}。删除后 New API 里走这些实例的请求会失败，密钥池也一并删除。`, {okText: '全部删除'}))) return;
     for (const k of keys) await api('/api/providers/' + encodeURIComponent(k), {method: 'DELETE'});
     toast(`已删除 ${keys.length} 个渠道实例`);
     state.pvSel = {}; act.loadProviders();
@@ -628,28 +590,43 @@ const act = {
     btn.innerHTML = `<i class="ti ti-eye${show ? '-slash' : ''}"></i>`;
   },
 
+  /** 模型/渠道候选集（给多选控件用）。渠道实例变动后由 loadProviders 失效重取。 */
+  async metaOptions() {
+    if (state._metaOpts) return state._metaOpts;
+    const r = await api('/api/meta/options');
+    if (!r || !r.ok) { toast((r && r.data.error) || '选项加载失败', true); return {models: [], providers: []}; }
+    state._metaOpts = r.data;
+    return state._metaOpts;
+  },
+
   async tokenToggle(id, val) {
     const r = await api('/api/tokens/' + id + '/patch', {method: 'POST', body: {enabled: !!val}});
     if (r && r.ok) { toast(val ? '令牌已启用' : '令牌已停用'); act.loadTokens(); } else toast((r && r.data.error) || '操作失败', true);
   },
 
   async tokenReset(id) {
-    if (!confirm('把该令牌的累计用量与费用清零？（额度重新开始计算）')) return;
+    if (!(await UI.confirm('把该令牌的累计用量与费用清零？（额度重新开始计算）', {okText: '清零'}))) return;
     const r = await api('/api/tokens/' + id + '/reset', {method: 'POST'});
     if (r && r.ok) { toast('已清零'); act.loadTokens(); }
   },
 
   async tokenDelete(id) {
     const t = state.tokens.find(x => x.id === id);
-    if (!confirm(`删除令牌「${t ? t.name : id}」？用它调用的客户端会立刻 401。`)) return;
+    if (!(await UI.confirm(`删除令牌「${t ? t.name : id}」？用它调用的客户端会立刻 401。`, {okText: '删除'}))) return;
     const r = await api('/api/tokens/' + id, {method: 'DELETE'});
     if (r && r.ok) { toast('已删除'); act.loadTokens(); } else toast((r && r.data.error) || '删除失败', true);
   },
 
-  tokenForm(id) {
+  async tokenForm(id) {
     const t = id ? state.tokens.find(x => x.id === id) : null;
     const dtx = t && t.expires_at ? new Date(t.expires_at * 1000).toISOString().slice(0, 16) : '';
-    const provs = state.providers.map(p => p.key);
+    const opt = await act.metaOptions();
+    // 候选集来自真实配置：模型来自各渠道的模型映射，渠道来自渠道实例列表
+    const mItems = (opt.models || []).map(m => ({value: m.id, label: m.id,
+      hint: m.providers.length + ' 个渠道可用', group: m.aliased ? '统一模型名' : '上游原生模型名'}));
+    const pItems = (opt.providers || []).map(p => ({value: p.key, label: p.label,
+      hint: p.key + ' · ' + (p.enabled ? '启用' : '已停用') + ' · ' + (p.models || []).length + ' 模型',
+      group: p.plugin_label || '其他插件'}));
     modal(t ? `编辑令牌 · ${t.name}` : '新建访问令牌', `
       <div class="row g-3">
         <div class="col-md-6"><label class="form-label">令牌名称（标识调用方）</label>
@@ -666,17 +643,25 @@ const act = {
           <div class="hint mt-1">与日志里的费用口径一致，不做汇率换算</div></div>
         <div class="col-md-4"><label class="form-label">到期时间（留空=永不过期）</label>
           <input class="form-control" id="tExp" type="datetime-local" value="${dtx}"></div>
-        <div class="col-md-6"><label class="form-label">允许的模型（逗号分隔，留空=全部）</label>
-          <input class="form-control" id="tModels" value="${esc((t?.allowed_models || []).join(', '))}" placeholder="gpt-image-2, gemini-3.1-flash-image"></div>
-        <div class="col-md-6"><label class="form-label">允许的渠道（逗号分隔，留空=全部）</label>
-          <input class="form-control" id="tProvs" value="${esc((t?.allowed_providers || []).join(', '))}" placeholder="${esc(provs.join(', '))}"></div>
+        <div class="col-md-6"><label class="form-label">允许的模型<span class="hint"> · 不选=全部</span></label>
+          <div id="pkModels"></div>
+          <div class="hint mt-1">从「模型目录」里勾选，避免手输拼错模型名</div></div>
+        <div class="col-md-6"><label class="form-label">允许的渠道<span class="hint"> · 不选=全部</span></label>
+          <div id="pkProvs"></div>
+          <div class="hint mt-1">限制该令牌只能走指定渠道（用于分渠道计费/隔离）</div></div>
         <div class="col-md-6"><label class="form-label">IP 白名单（逗号分隔，留空=不限）</label>
           <input class="form-control" id="tIps" value="${esc((t?.ips || []).join(', '))}" placeholder="10.0.0.5, 203.0.113.7"></div>
         <div class="col-md-6"><label class="form-label">备注</label>
           <input class="form-control" id="tNote" value="${esc(t?.note || '')}"></div>
       </div>`,
       `<button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
-       <button class="btn btn-primary" onclick="act.tokenSave(${id || 0})">${t ? '保存' : '创建并生成 key'}</button>`);
+       <button class="btn btn-primary" onclick="act.tokenSave(${id || 0})">${t ? '保存' : '创建并生成 key'}</button>`,
+      () => {   // 弹窗显示后再挂载（否则控件尺寸为 0，下拉定位会错）
+        state._pkModels = UI.picker('#pkModels', {items: mItems, selected: t?.allowed_models || [],
+          placeholder: '全部模型（不限）', searchPlaceholder: '搜索模型名…'});
+        state._pkProvs = UI.picker('#pkProvs', {items: pItems, selected: t?.allowed_providers || [],
+          placeholder: '全部渠道（不限）', searchPlaceholder: '搜索渠道…'});
+      });
   },
 
   async tokenSave(id) {
@@ -688,8 +673,8 @@ const act = {
       quota: parseFloat($('#tQuota').value || '0') || 0,
       quota_currency: $('#tCur').value,
       expires_at: $('#tExp').value ? Math.floor(Date.parse($('#tExp').value) / 1000) : 0,
-      allowed_models: $('#tModels').value.split(/[,，\s]+/).filter(Boolean),
-      allowed_providers: $('#tProvs').value.split(/[,，\s]+/).filter(Boolean),
+      allowed_models: state._pkModels ? state._pkModels.values : [],
+      allowed_providers: state._pkProvs ? state._pkProvs.values : [],
       ip_whitelist: $('#tIps').value.split(/[,，\s]+/).filter(Boolean).join(','),
       note: $('#tNote').value.trim()
     };
@@ -804,7 +789,7 @@ const act = {
   },
 
   async providerDelete(key) {
-    if (!confirm(`删除渠道实例 ${key}？`)) return;
+    if (!(await UI.confirm(`删除渠道实例 ${key}？`, {okText: '删除'}))) return;
     await api('/api/providers/' + encodeURIComponent(key), {method:'DELETE'});
     toast('已删除'); act.loadProviders();
   },
@@ -1074,9 +1059,9 @@ const act = {
         `<span class="num hint">${s.last_used == null ? '—' : money(s.last_used, s.last_unit)}</span>`,
         `<span class="hint">${esc(s.last_plan || '—')}</span>`, `<span class="hint">${fmtTime(s.last_checked)}</span>`,
         s.last_error ? pill('err', '失败') : (s.last_checked ? pill('ok dot', '正常') : pill('', '未查询')),
-        `<div class="row"><button class="btn btn-sm btn-primary" onclick="act.checkSite(${s.id}, this)">刷新</button>
-          <button class="btn btn-sm btn-outline-secondary" onclick="act.siteForm(${s.id})">编辑</button>
-          <button class="btn btn-sm btn-outline-danger" onclick="act.delSite(${s.id})">删除</button></div>`]))
+        `<div class="acts"><button class="btn btn-sm btn-primary" onclick="act.checkSite(${s.id}, this)"><i class="ti ti-refresh"></i> 刷新</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="act.siteForm(${s.id})"><i class="ti ti-pencil"></i> 编辑</button>
+          <button class="btn btn-sm btn-outline-danger" onclick="act.delSite(${s.id})"><i class="ti ti-trash"></i> 删除</button></div>`]))
       : emptyBox('还没有站点。可点「从 .env 导入」或「新增站点」', 'ti-wallet');
   },
 
@@ -1150,7 +1135,7 @@ const act = {
   },
 
   async delSite(id) {
-    if (!confirm('删除这个站点？')) return;
+    if (!(await UI.confirm('删除这个站点？', {okText: '删除'}))) return;
     await api('/api/sites/' + id, {method:'DELETE'});
     toast('已删除'); act.loadBalances();
   },
@@ -1197,29 +1182,14 @@ function fmtCosts(byCur) {
     .map(([c, v]) => (c === 'USD' ? '$' : '¥') + Number(v).toFixed(2));
   return parts.length ? parts.join(' + ') : '—';
 }
-function stat(k, v, x, icon, tone) {
-  return `<div class="stat ${tone || ''}">
-    ${icon ? `<div class="ico"><i class="ti ${icon}"></i></div>` : ''}
-    <div class="k">${esc(k)}</div><div class="v">${v}</div><div class="x">${x}</div></div>`;
-}
+const stat = UI.stat;
 function healthPill(ok) {
   if (ok == null) return pill('', '未探测');
   return ok == 1 ? pill('ok dot', '链路可达') : pill('err dot', '异常');
 }
-function table(heads, rows) {
-  return `<div class="table-wrap"><table class="tb"><thead><tr>${heads.map(h => `<th>${h}</th>`).join('')}</tr></thead>
-    <tbody>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-}
+const table = UI.table;
 
-/* 骨架屏：表格加载中的占位（借鉴 shadcn-admin / Tabler 的加载态） */
-function skelTable(cols, rows, opts = {}) {
-  const widths = opts.widths || [];
-  const head = `<thead><tr>${Array.from({length: cols}, (_, i) =>
-    `<th><span class="sk sk-h" style="width:${widths[i] || (46 + (i * 11) % 38)}%"></span></th>`).join('')}</tr></thead>`;
-  const body = `<tbody>${Array.from({length: rows}, (_, r) => `<tr>${Array.from({length: cols}, (_, i) =>
-    `<td><span class="sk" style="width:${widths[i] || (30 + ((i * 17 + r * 13) % 55))}%"></span></td>`).join('')}</tr>`).join('')}</tbody>`;
-  return `<div class="table-wrap sk-wrap"><table class="tb">${head}${body}</table></div>`;
-}
+const skelTable = UI.skelTable;   // 骨架屏占位（加载中）
 
 const TEMPLATE = `"""渠道插件模板 —— 复制成 app/channels/你的渠道.py 即可新增一个渠道类型。"""
 from .. import protocols

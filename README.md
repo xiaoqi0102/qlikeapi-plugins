@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg)](Dockerfile)
-[![Tests](https://img.shields.io/badge/tests-199%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-208%20passed-brightgreen.svg)](tests/)
 
 </div>
 
@@ -137,8 +137,17 @@ curl -s localhost:18673/healthz     # {"ok":true,...}
 ![探活进度](docs/images/3-probe.jpg)
 *零成本探活：逐模型显示通过/失败 + 耗时 + 上游状态码*
 
+![令牌多选](docs/images/5-token-picker.jpg)
+*访问令牌：模型/渠道权限改成下拉多选（搜索、全选、清空、已选计数）*
+
+![站点余额](docs/images/7-balances.jpg)
+*站点余额：操作按钮横向一排，附取数器说明*
+
 ![深色模式](docs/images/4-dark.jpg)
 *深色模式*
+
+![组件库](docs/images/6-ui-kit.jpg)
+*组件库展示页 `/ui-kit`：改 UI 前先在这里找现成组件*
 
 </div>
 
@@ -157,9 +166,13 @@ qlikeapi-plugins/
 │   ├── crypto.py               # 落库密钥加密（标准库 Encrypt-then-MAC）
 │   ├── balances.py             # 站点余额取数器（插件式）
 │   ├── channels/               # ★ 渠道插件目录（加新渠道只动这里）
-│   ├── static/                 # 控制台前端（含本地自托管 vendor/）
+│   ├── static/                 # 控制台前端
+│   │   ├── css/                #   tokens.css（设计变量）+ ui-kit.css（组件样式）
+│   │   ├── js/                 #   app.js（控制台逻辑）+ ui-kit.js（window.UI 组件库）
+│   │   ├── ui-kit.html         #   组件库展示页（/ui-kit，每个组件都能真点）
+│   │   └── vendor/             #   本地自托管：Bootstrap 5 / Tabler Icons / Chart.js
 │   └── requirements.txt
-├── tests/                      # pytest：198 个用例，零网络零成本
+├── tests/                      # pytest：208 个用例，零网络零成本
 ├── scripts/                    # 运维/验收脚本（零成本验证）
 ├── docs/                       # 架构、插件开发、API、配置、部署、路线图
 ├── .github/                    # CI、issue/PR 模板、dependabot
@@ -205,6 +218,8 @@ make test && make lint
 - **提交信息**：Conventional Commits（`feat:` / `fix:` / `docs:` / `refactor:` / `test:` / `chore:`）。
 - **测试**：新增行为必须带测试；**任何会真打上游的测试都不许进 `tests/`**（CI 里没有任何 API key）。
 - **版本**：语义化版本，改动记录进 [`CHANGELOG.md`](CHANGELOG.md)，`app/main.py` 的 `version` 与 tag 对齐。
+- **UI**：控制台样式与组件一律按 [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md) 来（先查组件库，别再造一套）；
+  改完 CSS 跑 `make ui-diff` 做新旧样式逐元素比对，确认「合计差异: 0」。
 
 细则（含代码风格、评审清单、发布流程）见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
@@ -231,6 +246,7 @@ make test && make lint
 | [docs/API.md](docs/API.md) | HTTP 接口手册（统一入口 / 控制台 API / 错误码） |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | 全部环境变量、令牌、价格与余额取数配置 |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker 部署、反代、接入 New API、备份升级回滚 |
+| [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) | UI 设计规范：设计变量、组件库清单、交互约定、变更流程与坑清单 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 已做 / 计划 / **明确不做**（含理由） |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
 

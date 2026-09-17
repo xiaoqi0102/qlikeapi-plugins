@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI 组件库 · qlikeapi-plugins</title>
+<link rel="stylesheet" href="/static/vendor/bootstrap.min.css">
+<link rel="stylesheet" href="/static/vendor/tabler-icons/tabler-icons.min.css">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/ui-kit.css">
+<style>
+  .kit-head{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line);
+    padding:14px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .kit-head h1{font-size:16px;margin:0;font-weight:650}
+  .kit-head .hint{flex:1 1 auto}
+  .kit-body{padding:20px;max-width:1180px;margin:0 auto}
+  .kit-sec{margin-bottom:22px}
+  .kit-sec h2{font-size:14px;margin:0 0 10px;color:var(--ink-2);display:flex;align-items:center;gap:7px}
+  .kit-sec h2 .pill{margin-left:auto;font-weight:400}
+  .kit-toc{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 16px}
+  .kit-toc a{font-size:12px;padding:3px 10px;border:1px solid var(--line);border-radius:999px;
+    color:var(--ink-2);text-decoration:none;background:#fff}
+  .kit-toc a:hover{border-color:var(--brand);color:var(--brand)}
+  body.dark .kit-toc a{background:#151d2c}
+</style>
+</head>
+<body>
+<div class="kit-head">
+  <h1><i class="ti ti-components"></i> UI 组件库 <span class="hint" style="font-size:12px">qlikeapi-plugins · 实时预览</span></h1>
+  <span class="hint">规范文档：docs/DESIGN-SYSTEM.md</span>
+  <a class="btn btn-sm btn-outline-secondary" href="/"><i class="ti ti-arrow-left"></i> 回控制台</a>
+  <button class="btn btn-sm btn-outline-secondary" onclick="document.body.classList.toggle('dark')">
+    <i class="ti ti-moon"></i> 切换深色</button>
+</div>
+
+<div class="kit-body">
+  <div class="kit-toc">
+    <a href="#c-color">色彩与排版</a><a href="#c-btn">按钮</a><a href="#c-badge">徽章标签</a>
+    <a href="#c-card">卡片与 KPI</a><a href="#c-table">表格</a><a href="#c-form">表单</a>
+    <a href="#c-picker">多选选择器</a><a href="#c-feedback">反馈</a><a href="#c-modal">弹窗</a>
+    <a href="#c-util">工具类</a>
+  </div>
+
+  <!-- 色彩与排版 -->
+  <section class="kit-sec" id="c-color">
+    <h2><i class="ti ti-palette"></i>色彩与排版<span class="pill">tokens.css</span></h2>
+    <div class="panel"><div class="body">
+      <div class="kit-row" id="swatches"></div>
+      <div class="hint mt-3">正文 13px / 表格 12.5px / 标题 14–16px；辅助文字用 <code class="mono">.hint</code>（--muted）。数字与代码用 <code class="mono">.num</code> / <code class="mono">.mono</code> 等宽对齐。</div>
+      <div class="kit-code">改色只改 tokens.css 的 :root；深色模式改 body.dark 的同名变量，组件里不要写死颜色</div>
+    </div></div>
+  </section>
+
+  <!-- 按钮 -->
+  <section class="kit-sec" id="c-btn">
+    <h2><i class="ti ti-click"></i>按钮<span class="pill">.btn / .ibtn</span></h2>
+    <div class="grid2">
+      <div class="panel"><header><h3>主按钮与次按钮</h3></header><div class="body">
+        <div class="kit-row">
+          <button class="btn btn-primary" onclick="UI.toast('主按钮：用于「保存 / 创建」这类主操作')"><i class="ti ti-check"></i> 主操作</button>
+          <button class="btn btn-outline-secondary" onclick="UI.toast('次按钮：取消 / 返回')">次操作</button>
+          <button class="btn btn-outline-danger" onclick="UI.toast('危险按钮：删除类操作，必须二次确认', true)"><i class="ti ti-trash"></i> 危险操作</button>
+        </div>
+        <div class="kit-row mt-3">
+          <button class="btn btn-sm btn-primary">小号</button>
+          <button class="btn btn-primary" disabled>禁用</button>
+          <button class="btn btn-link" onclick="UI.toast('文字按钮：用于表格内的轻操作')">文字按钮</button>
+        </div>
+        <div class="kit-code">.btn .btn-primary / .btn-outline-secondary / .btn-outline-danger / .btn-sm / .btn-link</div>
+      </div></div>
+      <div class="panel"><header><h3>图标按钮（表格操作列）</h3></header><div class="body">
+        <div class="acts">
+          <button class="ibtn" title="查看" onclick="UI.toast('图标按钮必须有 title，鼠标悬停可见用途')"><i class="ti ti-eye"></i></button>
+          <button class="ibtn" title="复制" onclick="UI.copy('演示文本')"><i class="ti ti-clipboard"></i></button>
+          <button class="ibtn danger" title="删除" onclick="UI.confirm('演示：确认删除？', {okText:'删除'}).then(v => UI.toast(v ? '已确认' : '已取消'))"><i class="ti ti-trash"></i></button>
+        </div>
+        <div class="hint mt-3">操作列统一用 <code class="mono">.acts</code> 横向排列（inline-flex + 6px 间距），禁止用 <code class="mono">.row</code> —— Bootstrap 的 <code class="mono">.row&gt;*</code> 是 100% 宽，会把按钮挤成竖排。</div>
+        <div class="kit-code">&lt;div class="acts"&gt;&lt;button class="ibtn" title="删除"&gt;…&lt;/button&gt;&lt;/div&gt;</div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- 徽章标签 -->
+  <section class="kit-sec" id="c-badge">
+    <h2><i class="ti ti-tag"></i>徽章与标签<span class="pill">.pill / .chip</span></h2>
+    <div class="panel"><div class="body">
+      <div class="kit-row">
+        <span class="pill ok dot">正常</span><span class="pill warn dot">降权</span><span class="pill err dot">异常</span>
+        <span class="pill info">原生透传</span><span class="pill">未探测</span>
+        <span class="chip">sub2api (/v1/usage)</span><span class="chip">gpt-image-2</span>
+      </div>
+      <div class="hint mt-3"><b>pill</b>＝状态（带圆点更醒目，颜色只有 ok/warn/err/info 四档）；<b>chip</b>＝中性信息（类型、模型名、渠道 key）。状态色不要用来自定义含义，否则一眼看不出好坏。</div>
+      <div class="kit-code">UI.pill('ok dot', '正常')   UI.chip('gpt-image-2')</div>
+    </div></div>
+  </section>
+
+  <!-- 卡片与 KPI -->
+  <section class="kit-sec" id="c-card">
+    <h2><i class="ti ti-layout-grid"></i>卡片与 KPI<span class="pill">.panel / .stat</span></h2>
+    <div class="kit-row" id="kpis" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px"></div>
+    <div class="panel mt-3"><header><h3><i class="ti ti-square"></i>面板（标题 + 右上角操作）</h3>
+      <div class="acts"><button class="btn btn-sm btn-outline-secondary" onclick="UI.toast('面板右上角放该面板的主操作')"><i class="ti ti-refresh"></i> 刷新</button></div>
+    </header><div class="body">
+      <div class="hint">面板＝一个自洽的功能块：标题说明「这是什么」，右上角放该块的主操作，内容区只放表格/表单/图表之一。</div>
+      <div class="kit-code">UI.stat('站点数量', '11', '已启用 11', 'ti-building', '')</div>
+    </div></div>
+  </section>
+
+  <!-- 表格 -->
+  <section class="kit-sec" id="c-table">
+    <h2><i class="ti ti-table"></i>表格 / 骨架屏 / 空状态<span class="pill">.tb / .sk / .empty</span></h2>
+    <div class="panel"><header><h3>数据表</h3><div class="acts">
+      <button class="btn btn-sm btn-outline-secondary" onclick="demoSkeleton()"><i class="ti ti-loader"></i> 演示加载态</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="demoEmpty()"><i class="ti ti-inbox"></i> 演示空状态</button>
+    </div></header><div class="body" id="tableHost"></div>
+      <div class="kit-code" style="margin:0 16px 16px">加载中用 UI.skelTable(列数, 行数)（列宽与真实表格对齐，避免加载完跳动）；无数据用 UI.empty('一句话说明 + 下一步该点什么', 'ti-inbox')</div>
+    </div>
+  </section>
+
+  <!-- 表单 -->
+  <section class="kit-sec" id="c-form">
+    <h2><i class="ti ti-forms"></i>表单<span class="pill">.form-control / .sw / .pinp</span></h2>
+    <div class="grid2">
+      <div class="panel"><div class="body">
+        <div class="mb-3"><label class="form-label">文本（带说明）</label>
+          <input class="form-control" placeholder="占位符给真实例子，不要写 xxx">
+          <div class="hint mt-1">说明文字写「为什么」，不要重复标签</div></div>
+        <div class="mb-3"><label class="form-label">下拉</label>
+          <select class="form-select"><option>CNY</option><option>USD</option></select></div>
+        <div class="mb-3"><label class="form-label">数字</label><input class="form-control num" type="number" value="5"></div>
+        <label class="sw"><input type="checkbox" checked><span></span> 启用（右侧开关，表格里用）</label>
+      </div></div>
+      <div class="panel"><div class="body">
+        <div class="hint mb-2">密钥类字段用 <code class="mono">.pinp</code>（等宽 + 打码 + 右侧眼睛切换）：</div>
+        <div class="pinp mb-3"><span class="mono">sk-live-••••••••••••3f9a</span>
+          <button class="ibtn" onclick="UI.toast('眼睛按钮：切换明文/打码')"><i class="ti ti-eye"></i></button></div>
+        <div class="hint">校验失败：字段下方给具体原因（如「模型名不存在」），不要只把边框变红。</div>
+        <div class="kit-code">&lt;div class="pinp"&gt;&lt;span class="mono"&gt;sk-…&lt;/span&gt;&lt;/div&gt;</div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- 多选选择器 -->
+  <section class="kit-sec" id="c-picker">
+    <h2><i class="ti ti-list-check"></i>多选选择器<span class="pill">UI.picker · .pk-*</span></h2>
+    <div class="panel"><div class="body">
+      <div class="row g-3">
+        <div class="col-md-6"><label class="form-label">允许的模型<span class="hint"> · 不选=全部</span></label>
+          <div id="pkDemoModels"></div>
+          <div class="hint mt-1">实时回显：<span class="mono" id="pkDemoOut">（未选）</span></div></div>
+        <div class="col-md-6"><label class="form-label">允许的渠道<span class="hint"> · 不选=全部</span></label>
+          <div id="pkDemoProvs"></div>
+          <div class="hint mt-1">候选集按插件分组，停用渠道也能选（可能随时恢复）。</div></div>
+      </div>
+      <div class="hint mt-3"><b>什么时候用</b>：字段值是「已存在集合里的若干个」时（模型、渠道、标签、分组）必须用它，
+        不要用逗号分隔的文本框 —— 手输拼错看不出来，也选不出不存在的项。</div>
+      <div class="kit-code">UI.picker('#pkModels', {items, selected, placeholder: '全部模型（不限）', onChange: v =&gt; …})</div>
+    </div></div>
+  </section>
+
+  <!-- 反馈 -->
+  <section class="kit-sec" id="c-feedback">
+    <h2><i class="ti ti-bell"></i>反馈<span class="pill">toast / confirm / bar / busy</span></h2>
+    <div class="grid2">
+      <div class="panel"><div class="body">
+        <div class="kit-row">
+          <button class="btn btn-outline-secondary" onclick="UI.toast('操作成功：右下角 3.8s 自动消失')"><i class="ti ti-circle-check"></i> 成功吐司</button>
+          <button class="btn btn-outline-secondary" onclick="UI.toast('失败吐司：必须说明原因，不要只说失败', true)"><i class="ti ti-alert-octagon"></i> 失败吐司</button>
+          <button class="btn btn-outline-secondary" onclick="UI.confirm('确认弹窗：危险操作必须走这里，禁止原生 confirm()', {okText:'确认'}).then(v => UI.toast(v ? '点了确认' : '点了取消'))">确认框</button>
+        </div>
+        <div class="hint mt-3">规则：能就地反馈的不要弹窗；破坏性操作必须确认；确认文案写清后果（「删除后调用会立刻 401」）。</div>
+      </div></div>
+      <div class="panel"><div class="body">
+        <div class="hint mb-2">进度条（探活/批量任务逐条进度）</div>
+        <div class="bar mb-2"><i style="width:32%"></i></div>
+        <div class="bar ok mb-2"><i style="width:100%"></i></div>
+        <div class="bar err mb-3"><i style="width:58%"></i></div>
+        <button class="btn btn-outline-secondary" onclick="demoBusy()"><i class="ti ti-progress"></i> 演示顶部加载条（1.5s）</button>
+        <div class="kit-code">UI.bar(32)   UI.busy(true) / UI.busy(false)</div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- 弹窗 -->
+  <section class="kit-sec" id="c-modal">
+    <h2><i class="ti ti-window"></i>弹窗<span class="pill">UI.modal</span></h2>
+    <div class="panel"><div class="body">
+      <div class="kit-row">
+        <button class="btn btn-outline-secondary" onclick="demoModal()"><i class="ti ti-window"></i> 打开表单弹窗</button>
+      </div>
+      <div class="hint mt-3">弹窗只用于「新建/编辑表单」和「不可逆操作的确认」；展示型信息优先放面板或吐司。表单弹窗宽度 modal-lg，长表单用 modal-dialog-scrollable。
+        第 4 个参数是显示后回调，挂载 <code class="mono">UI.picker</code> 这类需要尺寸的组件必须写在这里。</div>
+      <div class="kit-code">UI.modal('标题', bodyHTML, footHTML, () =&gt; { /* 挂载组件 */ })</div>
+    </div></div>
+  </section>
+
+  <!-- 工具类 -->
+  <section class="kit-sec" id="c-util">
+    <h2><i class="ti ti-tool"></i>工具类<span class="pill">.hint / .mono / .num / .acts / .grid2</span></h2>
+    <div class="panel"><div class="body">
+      <div class="kit-row"><span class="hint">.hint 辅助说明</span><span class="mono">.mono 等宽（key、路径）</span><span class="num">.num 数字右对齐</span></div>
+      <div class="hint mt-3">布局：<code class="mono">.grid2</code> 两栏、<code class="mono">.grid3</code> 三栏（窄屏自动单栏）、<code class="mono">.acts</code> 操作横排。
+        间距统一用 Bootstrap 的 <code class="mono">mt-1..4</code>，不要写行内 style。</div>
+      <div class="kit-code">.grid2 .grid3 .acts .hint .mono .num</div>
+    </div></div>
+  </section>
+</div>
+
+<div class="modal fade" id="modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title" id="mTitle">标题</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body" id="mBody"></div>
+      <div class="modal-footer" id="mFoot"></div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="/static/vendor/bootstrap.bundle.min.js"></script>
+<script src="/static/js/ui-kit.js"></script>
+<script>
+/* 组件展示页：所有交互都是真实的（点了就有反应），可直接抄这里的用法 */
+const TOKENS = ['--ink','--ink-2','--muted','--brand','--ok','--warn','--err','--bg','--line','--brand-soft','--ok-soft','--warn-soft','--err-soft'];
+document.getElementById('swatches').innerHTML = TOKENS.map(t => {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(t).trim();
+  return `<span class="chip" style="display:inline-flex;align-items:center;gap:6px">
+    <i style="display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.12);background:${v}"></i>
+    <span class="mono" style="font-size:11px">${t} ${v}</span></span>`;
+}).join('');
+
+document.getElementById('kpis').innerHTML =
+  UI.stat('站点数量', '11', '已启用 11', 'ti-building', '') +
+  UI.stat('可用余额合计', '$53.79', '按币种分别合计', 'ti-wallet', 'ok') +
+  UI.stat('低余额预警', '0', '低于各自设定阈值', 'ti-bell', '') +
+  UI.stat('查询异常', '6', '网络/鉴权失败，点刷新重试', 'ti-alert-triangle', 'err');
+
+const DEMO_ROWS = [
+  ['change2pro', UI.chip('sub2api'), '$2.72', UI.pill('ok dot', '正常'),
+   '<div class="acts"><button class="ibtn" title="刷新" onclick="UI.toast(&#39;已刷新&#39;)"><i class="ti ti-refresh"></i></button>' +
+   '<button class="ibtn danger" title="删除" onclick="UI.toast(&#39;危险操作先确认&#39;, true)"><i class="ti ti-trash"></i></button></div>'],
+  ['qnaigc-fal', UI.chip('fal 异步'), '—', UI.pill('warn dot', '降权'),
+   '<div class="acts"><button class="ibtn" title="刷新" onclick="UI.toast(&#39;已刷新&#39;)"><i class="ti ti-refresh"></i></button></div>'],
+];
+const tableHost = document.getElementById('tableHost');
+function demoTable() { tableHost.innerHTML = UI.table(['站点', '类型', '余额', '状态', '操作'], DEMO_ROWS); }
+function demoSkeleton() {
+  tableHost.innerHTML = UI.skelTable(5, 4);
+  setTimeout(() => { demoTable(); UI.toast('加载完成（骨架屏 → 数据）'); }, 1400);
+}
+function demoEmpty() {
+  tableHost.innerHTML = UI.empty('还没有站点：点右上角「新增站点」或「从 .env 导入」', 'ti-wallet');
+}
+function demoBusy() { UI.busy(true); setTimeout(() => UI.busy(false), 1500); }
+function demoModal() {
+  UI.modal('演示 · 编辑令牌', `
+    <div class="row g-3">
+      <div class="col-md-6"><label class="form-label">名称</label><input class="form-control" value="集梦作图工具"></div>
+      <div class="col-md-6"><label class="form-label">QPS 上限（0=不限）</label><input class="form-control num" type="number" value="5"></div>
+      <div class="col-md-12"><label class="form-label">允许的模型<span class="hint"> · 不选=全部</span></label>
+        <div id="pkInModal"></div></div>
+    </div>`,
+    `<button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+     <button class="btn btn-primary" onclick="UI.closeModal(); UI.toast(&#39;已保存（演示）&#39;)">保存</button>`,
+    () => UI.picker('#pkInModal', {items: DEMO_ITEMS, selected: ['gpt-image-2'], placeholder: '全部模型（不限）'}));
+}
+demoTable();
+
+const DEMO_ITEMS = [
+  {value: 'gpt-image-2', label: 'gpt-image-2', hint: '2 个渠道可用', group: '统一模型名'},
+  {value: 'gemini-3.1-flash-image', label: 'gemini-3.1-flash-image', hint: '1 个渠道可用', group: '统一模型名'},
+  {value: 'gpt-image-2.5-flare', label: 'gpt-image-2.5-flare', hint: '1 个渠道可用', group: '上游原生模型名'},
+  {value: 'fal-ai/flux/dev', label: 'fal-ai/flux/dev', hint: '1 个渠道可用', group: '上游原生模型名'},
+];
+const DEMO_PROVS = [
+  {value: 'change2pro', label: 'Change2Pro（香蕉 + image2）', hint: 'change2pro · 启用 · 5 模型', group: 'sub2api'},
+  {value: 'qnaigc-fal', label: '七牛 fal 异步', hint: 'qnaigc-fal · 启用 · 5 模型', group: '七牛 / ModelInk'},
+  {value: 'qnaigc-sync', label: '七牛同步（已停用）', hint: 'qnaigc-sync · 已停用 · 3 模型', group: '七牛 / ModelInk'},
+];
+const pkOut = document.getElementById('pkDemoOut');
+UI.picker('#pkDemoModels', {items: DEMO_ITEMS, selected: ['gpt-image-2'],
+  placeholder: '全部模型（不限）', searchPlaceholder: '搜索模型名…',
+  onChange: v => pkOut.textContent = v.length ? v.join(', ') : '（未选）'});
+UI.picker('#pkDemoProvs', {items: DEMO_PROVS, selected: [], placeholder: '全部渠道（不限）'});
+</script>
+</body>
+</html>

@@ -461,6 +461,35 @@ def api_models(request: Request):
     return out
 
 
+@router.get("/meta/options")
+def api_meta_options(request: Request):
+    """给前端选择器用的轻量选项表（模型 / 渠道 / 币种）。
+
+    与 /models 的区别：这里不查价格、不查健康，只回「有哪些可选项」，
+    供令牌弹窗的多选控件一次性拉取（比 /providers 轻得多）。
+    """
+    u, err = need_user(request)
+    if err:
+        return err
+    models: dict = {}
+    providers = []
+    for p in store.list_providers():
+        ch = channels.get(p.get("protocol") or "")
+        ids = []
+        for m in protocols.model_list(p):
+            ids.append(m["id"])
+            row = models.setdefault(m["id"], {"id": m["id"], "providers": [], "aliased": False})
+            row["providers"].append(p["key"])
+            row["aliased"] = row["aliased"] or bool(m["aliased"])
+        providers.append({"key": p["key"], "label": p["label"], "enabled": bool(p["enabled"]),
+                          "plugin": p.get("protocol"), "plugin_label": ch.label if ch else None,
+                          "priority": p.get("priority") or 0, "models": ids})
+    providers.sort(key=lambda x: (-x["priority"], x["key"]))
+    return {"models": sorted(models.values(), key=lambda x: x["id"]),
+            "providers": providers,
+            "currencies": ["CNY", "USD"]}
+
+
 # ------------------------------------------------------------------ 路由规则
 
 def _chain_item(p: dict) -> dict:

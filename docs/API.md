@@ -185,6 +185,7 @@ curl -s -X POST "http://127.0.0.1:18673/up/change2pro/v1/images/preview" \
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/models` | 模型 × 渠道矩阵（含单价） |
+| GET | `/api/meta/options` | 下拉选项：`models[]`（统一模型名 + 可用渠道数 + 上游真名）、`providers[]`（渠道 key/标签/启停）；供令牌弹窗的多选选择器使用 |
 | GET / POST | `/api/prices` | 单价表（`model`,`provider`,`price`,`currency`,`source`） |
 | POST | `/api/prices/sync` | 从 New API 同步价格口径 |
 | DELETE | `/api/prices/{id}` | 删一条价格 |
