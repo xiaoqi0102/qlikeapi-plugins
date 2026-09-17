@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg)](Dockerfile)
-[![Tests](https://img.shields.io/badge/tests-208%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-237%20passed-brightgreen.svg)](tests/)
 
 </div>
 
@@ -148,6 +148,8 @@ curl -s localhost:18673/healthz     # {"ok":true,...}
 *深色模式*
 
 ![组件库](docs/images/6-ui-kit.jpg)
+![日志完整请求](docs/images/9-log-curl.jpg)
+![拉取上游模型](docs/images/10-fetch-models.jpg)
 *组件库展示页 `/ui-kit`：改 UI 前先在这里找现成组件*
 
 </div>
@@ -173,7 +175,7 @@ qlikeapi-plugins/
 │   │   ├── ui-kit.html         #   组件库展示页（/ui-kit，每个组件都能真点）
 │   │   └── vendor/             #   本地自托管：Bootstrap 5 / Tabler Icons / Chart.js
 │   └── requirements.txt
-├── tests/                      # pytest：208 个用例，零网络零成本
+├── tests/                      # pytest：237 个用例，零网络零成本
 ├── scripts/                    # 运维/验收脚本（零成本验证）
 ├── docs/                       # 架构、插件开发、API、配置、部署、路线图
 ├── .github/                    # CI、issue/PR 模板、dependabot

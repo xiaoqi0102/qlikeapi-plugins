@@ -295,6 +295,31 @@ def api_provider_test(key: str, request: Request, model: str = ""):
     return res
 
 
+@router.post("/providers/{key}/fetch-models")
+def api_provider_fetch_models(key: str, request: Request):
+    """拉取上游模型列表（零成本：只发一个 GET /v1/models，绝不出图）。
+
+    借鉴 New API 渠道页的「获取模型列表」：直接拉上游清单，勾选后一键写进模型映射，
+    省掉手工敲模型名；同一平台重复命名的模型会自动去重。
+    路径优先取渠道 options.models_path，其次依次试 /v1/models、/models。
+    """
+    u, err = need_user(request)
+    if err:
+        return err
+    p = store.get_provider(key)
+    if not p:
+        return JSONResponse({"error": f"渠道 '{key}' 不存在（先保存渠道，再拉取模型）"}, status_code=404)
+    keys = store.provider_keys(p)
+    if not keys:
+        return JSONResponse({"error": "这个渠道还没配 API key，先填 key 并保存"}, status_code=400)
+    res = protocols.fetch_upstream_models(p, key=keys[0])
+    if not res.get("ok"):
+        return JSONResponse({"error": res.get("error") or "拉取失败"}, status_code=400)
+    res["existing"] = list((p.get("model_map") or {}).keys())
+    res["provider"] = key
+    return res
+
+
 # ------------------------------------------------------------------ 日志 / 监控 / 任务
 
 @router.get("/logs")
@@ -974,4 +999,9 @@ def api_sysinfo(request: Request):
             "enc": {"enabled": True, "source": "QLIKEAPI_ENC_KEY" if os.environ.get("QLIKEAPI_ENC_KEY") else "QLIKEAPI_SECRET",
                     **store.enc_health()},
             "breaker": {"after": store.AUTO_DISABLE_AFTER, "cooldown": store.AUTO_RECOVER_SEC},
-            "plugins": channels.available_ids(), "plugin_errors": channels.ERRORS}
+            "plugins": channels.available_ids(), "plugin_errors": channels.ERRORS,
+            # 阶段 1：并发闸门 + 路由决策参数（控制台「系统信息」页直接展示）
+            "gate": relay.gate.stats(),
+            "router": {"max_attempts": relay.MAX_ROUTE_ATTEMPTS,
+                       "retryable": list(relay.RETRYABLE),
+                       "global_limit": relay.GLOBAL_LIMIT}}

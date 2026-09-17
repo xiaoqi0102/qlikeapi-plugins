@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS logs (
     model TEXT, public_path TEXT, http_status INTEGER,
     upstream_status INTEGER, ms INTEGER, error TEXT,
     request_json TEXT, upstream_request TEXT, response_snippet TEXT,
+    upstream_url TEXT, upstream_method TEXT, upstream_headers TEXT,
     kind TEXT DEFAULT 'relay'
 );
 CREATE TABLE IF NOT EXISTS users (
@@ -125,6 +126,10 @@ MIGRATIONS = [
     # v3.1：日志记账到「访问令牌」
     ("logs", "token", "TEXT"),
     ("logs", "token_id", "INTEGER"),
+    # v3.4.2：日志详情要能还原「完整请求」（url / method / 请求头，凭据已脱敏）
+    ("logs", "upstream_url", "TEXT"),
+    ("logs", "upstream_method", "TEXT"),
+    ("logs", "upstream_headers", "TEXT"),
 ]
 
 
@@ -220,18 +225,22 @@ def provider_keys(p: dict) -> list[str]:
 
 def log_row(provider, model, path, status, up_status, ms, error, req, up_req, snippet,
             kind="relay", attempts=None, key_index=None, images=None, cost=None,
-            cost_currency=None, token=None, token_id=None) -> None:
+            cost_currency=None, token=None, token_id=None,
+            up_url=None, up_method=None, up_headers=None) -> None:
     """写请求日志；任何异常都吞掉，绝不影响主流程。"""
     try:
         with connect() as c:
             c.execute(
                 "INSERT INTO logs(ts,provider,model,public_path,http_status,upstream_status,ms,error,"
                 "request_json,upstream_request,response_snippet,kind,attempts,key_index,images,cost,"
-                "cost_currency,token,token_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "cost_currency,token,token_id,upstream_url,upstream_method,upstream_headers)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (int(time.time()), provider, model, path, status, up_status, ms, error,
                  json.dumps(req, ensure_ascii=False)[:8000],
                  json.dumps(up_req, ensure_ascii=False)[:8000], (snippet or "")[:4000], kind,
-                 attempts, key_index, images, cost, cost_currency, token, token_id))
+                 attempts, key_index, images, cost, cost_currency, token, token_id,
+                 up_url, up_method,
+                 json.dumps(up_headers, ensure_ascii=False) if up_headers else None))
             c.execute("DELETE FROM logs WHERE id < (SELECT MAX(id) FROM logs) - 5000")
     except Exception:
         pass

@@ -14,6 +14,7 @@ import hmac
 import json
 import os
 import random
+import threading
 import time
 from typing import Any
 
@@ -25,6 +26,75 @@ from . import channels, protocols, store
 router = APIRouter()
 RETRYABLE = (402, 408, 409, 425, 429, 500, 502, 503, 504, 529)
 MAX_KEY_ATTEMPTS = 3
+
+# ---- 并发闸门（阶段 1）参数：默认「不限并发」，按渠道或全局开启 ----
+GLOBAL_LIMIT = int(os.getenv("QLIKEAPI_MAX_CONCURRENCY", "0") or 0)      # 0 = 不限制
+QUEUE_WAIT = float(os.getenv("QLIKEAPI_QUEUE_WAIT", "30"))               # 排队最多等多久（秒）
+MAX_WAITING = int(os.getenv("QLIKEAPI_MAX_WAITING", "32"))               # 等待队列上限
+MAX_ROUTE_ATTEMPTS = int(os.getenv("QLIKEAPI_MAX_ROUTE_ATTEMPTS", "6"))  # 一条请求最多打几次上游
+
+
+class _Gate:
+    """并发闸门：槽位 + 排队 + 超时 + 队列上限（语义借鉴 sub2api 的图片并发限流器）。
+
+    - 每个渠道一个计数槽；上限取渠道 options.max_concurrency，没配就退到全局 QLIKEAPI_MAX_CONCURRENCY；
+    - 两者都是 0 时不拦截（默认行为不变，按需开启）；
+    - 拿不到槽位不会立刻失败：先排队等 QUEUE_WAIT 秒，等不到才拒（429/503 + Retry-After），
+      路由层遇到「某个渠道排队超时」会先换下一家，做到「降低单点依赖」。
+    """
+
+    def __init__(self) -> None:
+        self._cv = threading.Condition()
+        self._busy: dict[str, int] = {}
+        self._waiting = 0
+        self.rejected = 0
+
+    def limit_of(self, p: dict) -> int:
+        opt = p.get("options") or {}
+        try:
+            own = int(opt.get("max_concurrency") or 0)
+        except Exception:
+            own = 0
+        return own or GLOBAL_LIMIT
+
+    def acquire(self, key: str, limit: int) -> str | None:
+        """拿到槽位返回 None；否则返回拒绝原因（人类可读）。"""
+        if limit <= 0:
+            return None
+        with self._cv:
+            if self._waiting >= MAX_WAITING:
+                self.rejected += 1
+                return f"等待队列已满（{self._waiting}/{MAX_WAITING}）"
+            self._waiting += 1
+            try:
+                deadline = time.time() + QUEUE_WAIT
+                while self._busy.get(key, 0) >= limit:
+                    left = deadline - time.time()
+                    if left <= 0:
+                        self.rejected += 1
+                        return f"排队 {QUEUE_WAIT:.0f}s 仍未拿到并发槽位（上限 {limit}）"
+                    self._cv.wait(min(left, 0.5))
+                self._busy[key] = self._busy.get(key, 0) + 1
+                return None
+            finally:
+                self._waiting -= 1
+
+    def release(self, key: str) -> None:
+        with self._cv:
+            n = self._busy.get(key, 0) - 1
+            if n <= 0:
+                self._busy.pop(key, None)
+            else:
+                self._busy[key] = n
+            self._cv.notify_all()
+
+    def stats(self) -> dict:
+        with self._cv:
+            return {"busy": dict(self._busy), "waiting": self._waiting, "rejected": self.rejected,
+                    "global_limit": GLOBAL_LIMIT, "queue_wait": QUEUE_WAIT, "max_waiting": MAX_WAITING}
+
+
+gate = _Gate()
 # 内存态：每个渠道的 key 轮换指针 + 冷却时间（重启即重置，轻量够用）
 _KEY_STATE: dict[str, dict] = {}
 
@@ -216,6 +286,21 @@ def _shape_success(p: dict, body: dict, meta: dict, up_json: Any, headers: dict,
 
 # ------------------------------------------------------------------ 单渠道调用（可被路由层复用）
 
+def _redact_headers(headers: dict, secret: str | None = None) -> dict:
+    """把请求头里的凭据换成占位符 —— 日志要能还原「完整请求」，但凭据绝不入库。
+
+    占位符按鉴权方式给不同名字，方便直接复制去实测时替换。
+    """
+    out = {}
+    for k, v in (headers or {}).items():
+        if secret and secret in str(v):
+            v = str(v).replace(secret, "YOUR_API_KEY")
+        elif k.lower() in ("authorization", "x-goog-api-key", "x-api-key", "api-key"):
+            v = "YOUR_API_KEY"
+        out[k] = v
+    return out
+
+
 def _countable_failure(status: int | None) -> bool:
     """这次失败要不要算到「渠道连续失败」里（够数就自动停用该渠道）。"""
     if status is None:                 # 连接失败/超时
@@ -276,7 +361,8 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
                 store.log_row(provider, body.get("model"), f"/up/{provider}/v1/images", status, status,
                               int((time.time() - t0) * 1000), msg, body, up_body, up_text,
                               kind=log_kind, attempts=attempt, key_index=idx,
-                              token=tk_name, token_id=tk_id)
+                              token=tk_name, token_id=tk_id,
+                              up_url=url, up_method="POST", up_headers=_redact_headers(headers, secret))
             if _countable_failure(status):          # 渠道级失败计数（够数自动停用）
                 store.bump_provider_fail(provider, f"上游 {status}: {msg[:160]}", disconnect=True)
             return JSONResponse({"error": {"message": f"upstream {status}: {msg}", "type": "upstream_error",
@@ -296,7 +382,8 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
                           int((time.time() - t0) * 1000), None, body, up_body,
                           json.dumps(out, ensure_ascii=False)[:1200], kind=log_kind,
                           attempts=attempt, key_index=idx, images=images, cost=cost, cost_currency=currency,
-                          token=tk_name, token_id=tk_id)
+                          token=tk_name, token_id=tk_id,
+                          up_url=url, up_method="POST", up_headers=_redact_headers(headers, secret))
         return out, {"ms": int((time.time() - t0) * 1000), "upstream_status": status,
                      "images": images, "cost": cost, "currency": currency, "attempts": attempt}
 
@@ -306,7 +393,8 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
     if do_log:
         store.log_row(provider, body.get("model"), f"/up/{provider}/v1/images", 503,
                       last[0] if last else None, int((time.time() - t0) * 1000), msg, body, None, None,
-                      kind=log_kind, attempts=len(tried), token=tk_name, token_id=tk_id)
+                      kind=log_kind, attempts=len(tried), token=tk_name, token_id=tk_id,
+                      up_url=url, up_method="POST")
     store.bump_provider_fail(provider, msg, disconnect=True)   # 整条渠道的 key 都不行了 → 计入熔断
     return JSONResponse({"error": {"message": msg, "type": "upstream_error", "provider": provider,
                                    "attempts": len(tried)}}, status_code=503), {"ms": int((time.time() - t0) * 1000)}
@@ -455,14 +543,71 @@ def _handle(provider: str, request: Request, edit: bool, dry: bool = False, prob
                              "operations": ch.info()["operations"] if ch else [],
                              "url": url, "upstream_body": shown, "meta": meta})
 
-    out, info = invoke_provider(p, body, edit, access=access, log_kind="probe" if probe else "relay")
+    # 直连面同样过并发闸门：拿不到槽位就 503 + Retry-After，别把上游打爆
+    limit = gate.limit_of(p)
+    q0 = time.time()
+    rej = gate.acquire(provider, limit)
+    if rej:
+        return JSONResponse({"error": {"message": f"渠道 '{provider}' 并发已满：{rej}",
+                                       "type": "rate_limit_error", "provider": provider}},
+                            status_code=503, headers={"Retry-After": "3"})
+    queue_ms = int((time.time() - q0) * 1000)
+    try:
+        out, info = invoke_provider(p, body, edit, access=access, log_kind="probe" if probe else "relay")
+    finally:
+        gate.release(provider)
     if isinstance(out, JSONResponse):
         return out
-    return JSONResponse(protocols.unify_model(p, body, out))
+    resp = JSONResponse(protocols.unify_model(p, body, out))
+    resp.headers["X-QLike-Provider"] = provider
+    resp.headers["X-QLike-Attempt"] = "1"
+    resp.headers["X-QLike-Queue-Ms"] = str(queue_ms)
+    return resp
+
+
+def _tiers(chain: list[dict]) -> list[list[dict]]:
+    """把候选链按优先级分档（chain 已按「优先级降序 + 档内加权随机」排好）。"""
+    out: list[list[dict]] = []
+    for p in chain:
+        pr = int(p.get("priority") or 0)
+        if out and int(out[-1][0].get("priority") or 0) == pr:
+            out[-1].append(p)
+        else:
+            out.append([p])
+    return out
+
+
+def _tier_retry(tier: list[dict]) -> int:
+    """同档重试次数：取该档渠道里最大的 options.retry（借鉴 New API priorities[retry] 的逐档降级）。
+
+    默认 0 = 同档不重试，失败立刻降到下一档（图片生成重试有重复扣费风险，默认保守）。
+    """
+    n = 0
+    for p in tier:
+        try:
+            n = max(n, int((p.get("options") or {}).get("retry") or 0))
+        except Exception:
+            continue
+    return max(0, min(n, 2))
+
+
+def _attempt_sequence(tiers: list[list[dict]]) -> list[tuple[dict, int]]:
+    """展开成 (渠道, 档位) 的尝试序列：同一档先重试 retry 轮，再降到下一档。"""
+    seq: list[tuple[dict, int]] = []
+    for ti, tier in enumerate(tiers):
+        for _ in range(1 + _tier_retry(tier)):
+            for p in tier:
+                seq.append((p, ti))
+    return seq[:MAX_ROUTE_ATTEMPTS]
 
 
 def _handle_router(request: Request, edit: bool):
-    """统一入口 /up/qlikeapi-plugins/v1/images/...：按模型路由到各上游渠道实例，带故障切换。"""
+    """统一入口 /v1/images/...：按模型路由到各上游渠道实例。
+
+    阶段 1 语义：优先级分档 → 同档内按权重分流（档内 retry 次重试）→ 档失败则降级到下一档；
+    每档进上游前过并发闸门（槽位/排队），某家排队超时先换下一家（降低单点依赖）；
+    路由决策通过 X-QLike-* 响应头回给客户端，可观测、可对账。
+    """
     access, deny = _authorize(request)
     if deny:
         return deny
@@ -478,26 +623,51 @@ def _handle_router(request: Request, edit: bool):
         store.log_row("-", model, "/v1/images", 404, None, 0,
                       f"没有渠道支持模型 '{model}'", body, None, None, kind="client",
                       token=(access or {}).get("name"), token_id=(access or {}).get("id"))
-        return JSONResponse({"error": {"message": f"没有渠道实例支持模型 '{model}'（可在控制台「路由规则」里指定）",
+        return JSONResponse({"error": {"message": f"没有渠道实例支持模型 '{model}'（可在控制台「渠道实例」里配置模型映射）",
                                        "type": "invalid_request_error"}}, status_code=404)
 
+    tiers = _tiers(chain)
+    seq = _attempt_sequence(tiers)
+    chain_names = [p["key"] for p in chain]
     tried: list[str] = []
+    saturated: list[str] = []
     last: tuple[str, int, str] | None = None
-    for p in chain:
+    attempt = 0
+    for p, tier_idx in seq:
         body["model"] = protocols.match_model(p, model)      # 大小写不敏感 + 别名归一
         scope = _guard_scope(access, body["model"], p["key"])
         if scope:
             return scope
-        out, info = invoke_provider(p, body, edit, access=access, log_kind="relay")
+        limit = gate.limit_of(p)
+        q0 = time.time()
+        rej = gate.acquire(p["key"], limit)
+        if rej:
+            # 这家排队等不到槽位 → 不硬等，直接换下一家（这就是「降低单点依赖」）
+            saturated.append(f"{p['key']}（{rej}）")
+            continue
+        queue_ms = int((time.time() - q0) * 1000)
+        try:
+            attempt += 1
+            out, info = invoke_provider(p, body, edit, access=access, log_kind="relay")
+        finally:
+            gate.release(p["key"])
         if not isinstance(out, JSONResponse):
+            snippet = {"chain": chain_names, "attempt": attempt, "degrade": tier_idx,
+                       "queue_ms": queue_ms, "ok": p["key"]}
             if tried:
-                store.log_row("-", model, "/v1/images", 200, None,
-                              int((time.time() - t0) * 1000), None, body, None,
-                              json.dumps({"failed_over_from": tried}, ensure_ascii=False),
-                              kind="router", attempts=len(tried) + 1)
+                snippet["failed_over_from"] = tried
+            if saturated:
+                snippet["saturated"] = saturated
+            store.log_row("-", model, "/v1/images", 200, None, int((time.time() - t0) * 1000),
+                          None, body, None, json.dumps(snippet, ensure_ascii=False),
+                          kind="router", attempts=attempt)
             resp = JSONResponse(protocols.unify_model(p, body, out, client_model=model))
-            resp.headers["X-QLike-Provider"] = p["key"]          # 方便和 New API 日志对账
+            resp.headers["X-QLike-Provider"] = p["key"]        # 方便和 New API 日志对账
             resp.headers["X-QLike-Failover"] = str(len(tried))
+            resp.headers["X-QLike-Chain"] = ",".join(chain_names)
+            resp.headers["X-QLike-Attempt"] = str(attempt)
+            resp.headers["X-QLike-Degrade"] = str(tier_idx)     # 0 = 首档即成功，没降级
+            resp.headers["X-QLike-Queue-Ms"] = str(queue_ms)
             return resp
         tried.append(p["key"])
         try:
@@ -509,15 +679,30 @@ def _handle_router(request: Request, edit: bool):
         if status not in RETRYABLE:      # 非渠道类错误（请求本身有问题）直接返回，避免无谓重试
             return out
 
+    if not tried and saturated:
+        # 所有候选都在排队/满队，一次上游都没打出去 —— 明确告诉客户端退避重试
+        store.log_row("-", model, "/v1/images", 503, None, int((time.time() - t0) * 1000),
+                      "所有候选渠道并发已满：" + "；".join(saturated)[:300], body, None,
+                      json.dumps({"saturated": saturated}, ensure_ascii=False), kind="router")
+        resp = JSONResponse({"error": {"message": "所有候选渠道并发已满，请稍后重试（" + "；".join(saturated)[:200] + "）",
+                                       "type": "rate_limit_error", "saturated": saturated}},
+                            status_code=503)
+        resp.headers["Retry-After"] = "3"
+        resp.headers["X-QLike-Chain"] = ",".join(chain_names)
+        return resp
+
     store.log_row("-", model, "/v1/images", last[1] if last else 503, last[1] if last else None,
                   int((time.time() - t0) * 1000),
                   f"路由链全部失败：{last[2][:300] if last else ''}", body, None,
-                  json.dumps({"tried": tried}, ensure_ascii=False), kind="router")
-    return JSONResponse({"error": {"message": f"该模型的所有上游渠道都失败了（依次尝试：{', '.join(tried)}）；"
+                  json.dumps({"tried": tried, "chain": chain_names, "saturated": saturated},
+                             ensure_ascii=False), kind="router", attempts=attempt)
+    resp = JSONResponse({"error": {"message": f"该模型的所有上游渠道都失败了（依次尝试：{', '.join(tried)}）；"
                                               f"最后一次：{last[2][:200] if last else ''}",
                                    "type": "upstream_error", "tried": tried}},
                         status_code=last[1] if last and last[1] >= 400 else 503)
-
+    resp.headers["X-QLike-Chain"] = ",".join(chain_names)
+    resp.headers["X-QLike-Attempt"] = str(attempt)
+    return resp
 
 
 # ------------------------------------------------------------------ 路由
@@ -600,7 +785,7 @@ def selftest_provider(p: dict, model: str | None = None) -> dict:
     keys = store.provider_keys(p)
     if not keys:
         res = {"ok": False, "model": m, "error": "no api key"}
-        _log_probe(p, m, url, res)
+        _log_probe(p, m, url, res, up_body=up_body)
         return res
     headers = protocols.auth_headers(p.get("auth_mode") or "bearer", keys[0])
     t0 = time.time()
@@ -613,7 +798,7 @@ def selftest_provider(p: dict, model: str | None = None) -> dict:
                "timeout": timeout,
                "error": ("探活超时（%ds 内上游没回应，说明这条链路上该模型名/路径不被接受或上游挂起）" % int(PROBE_TIMEOUT))
                         if timeout else repr(e)}
-        _log_probe(p, m, url, res, ms)
+        _log_probe(p, m, url, res, ms, up_body=up_body)
         return res
     msg = up_text[:600]
     if isinstance(up_json, dict):
@@ -622,18 +807,31 @@ def selftest_provider(p: dict, model: str | None = None) -> dict:
     res = {"ok": reachable, "reachable": reachable, "model": m, "url": url, "upstream_status": status,
            "ms": int((time.time() - t0) * 1000), "upstream_message": msg,
            "note": "已清空 prompt 的探活：4xx = 链路/鉴权/模型名都通（上游只是拒绝了空请求）；5xx = 上游异常；超时 = 上游挂起。零成本"}
-    _log_probe(p, m, url, res)
+    _log_probe(p, m, url, res, up_body=up_body)
     return res
 
 
-def _log_probe(p: dict, model: str, url: str, res: dict, ms: int | None = None) -> None:
-    """探活也写进请求日志（类型=探活），便于和「真调用」对账。"""
+def _log_probe(p: dict, model: str, url: str, res: dict, ms: int | None = None,
+               up_body: dict | None = None) -> None:
+    """探活也写进请求日志（类型=探活），便于和「真调用」对账。
+
+    和真调用一样记完整请求（URL / 方法 / 请求头占位），这样日志详情里的 curl 对探活也可用。
+    """
+    red = None
+    try:
+        ks = store.provider_keys(p)
+        if ks:
+            red = _redact_headers(protocols.auth_headers(p.get("auth_mode") or "bearer", ks[0]), ks[0])
+    except Exception:
+        red = None
     try:
         store.log_row(p.get("key") or "", model, "/probe", 200 if res.get("ok") else 502,
                       res.get("upstream_status"), ms if ms is not None else res.get("ms") or 0,
                       None if res.get("ok") else (res.get("error") or res.get("upstream_message")),
-                      json.dumps({"probe": True, "model": model}, ensure_ascii=False), "", "",
-                      kind="probe")
+                      json.dumps({"probe": True, "model": model}, ensure_ascii=False),
+                      json.dumps(up_body, ensure_ascii=False) if up_body else "", "",
+                      kind="probe", up_url=url or None, up_method="POST" if url else None,
+                      up_headers=red)
     except Exception:
         pass
 

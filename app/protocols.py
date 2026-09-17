@@ -190,11 +190,90 @@ def default_model(p: dict) -> str:
 
 
 def model_list(p: dict) -> list[dict]:
+    """渠道对外暴露的模型清单。同一平台里重复命名的模型只留一条（借鉴 New API 的去重口径）。"""
     out = []
+    seen: set[str] = set()
     for name, entry in (p.get("model_map") or {}).items():
+        name = str(name).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
         up = entry.get("upstream") if isinstance(entry, dict) else entry
         out.append({"id": name, "upstream": up or name, "aliased": bool(up and up != name)})
     return out
+
+
+# ------------------------------------------------------------------ 上游模型列表
+
+MODELS_PATHS = ("/v1/models", "/models")
+
+
+def model_ids_from(payload: Any) -> list[str]:
+    """从各种上游返回形态里抽模型名，并去重（OpenAI 的 {data:[{id}]}、裸数组、{models:[...]} 都认）。"""
+    items: list[Any] = []
+    if isinstance(payload, dict):
+        for k in ("data", "models", "result", "items"):
+            if isinstance(payload.get(k), list):
+                items = payload[k]
+                break
+        if not items and isinstance(payload.get("model"), str):
+            items = [payload["model"]]
+    elif isinstance(payload, list):
+        items = payload
+    out: list[str] = []
+    for it in items:
+        if isinstance(it, str):
+            mid = it
+        elif isinstance(it, dict):
+            mid = it.get("id") or it.get("name") or it.get("model") or it.get("slug") or ""
+        else:
+            mid = ""
+        mid = str(mid).strip()
+        if mid and mid not in out:                 # 去重：同一平台重复命名只留一条
+            out.append(mid)
+    return out
+
+
+def fetch_upstream_models(p: dict, key: str | None = None, path: str | None = None,
+                          timeout: float = 15.0) -> dict:
+    """拉取上游模型列表 —— 零成本：只发一个 GET /v1/models，绝不触发任何出图。
+
+    路径优先用渠道 options.models_path，其次依次试 /v1/models、/models；
+    返回统一形态 {"ok":bool, "url":str, "http_status":int, "models":[str], "count":int} 或 {"ok":False,"error":str}。
+    """
+    base = str(p.get("base_url") or "").rstrip("/")
+    if not base:
+        return {"ok": False, "error": "这个渠道还没配 base_url"}
+    if not key:
+        return {"ok": False, "error": "这个渠道还没配 API key"}
+    cand: list[str] = []
+    if path:
+        cand.append(path)
+    else:
+        opt = str((p.get("options") or {}).get("models_path") or "").strip()
+        if opt:
+            cand.append(opt)
+    cand += [x for x in MODELS_PATHS if x not in cand]
+    headers = auth_headers(p.get("auth_mode") or "bearer", key)
+    headers.setdefault("Accept", "application/json")
+    errs: list[str] = []
+    for pa in cand:
+        url = base + ("" if pa.startswith("/") else "/") + pa
+        try:
+            r = HTTP.get(url, headers=headers, timeout=timeout)
+        except Exception as e:
+            errs.append(f"{pa}: {e!r}")
+            continue
+        try:
+            payload = r.json()
+        except Exception:
+            payload = None
+        ids = model_ids_from(payload)
+        if r.status_code < 400 and ids:
+            return {"ok": True, "url": url, "http_status": r.status_code,
+                    "models": sorted(ids), "count": len(ids)}
+        errs.append(f"{pa}: HTTP {r.status_code} {(r.text or '')[:120]}")
+    return {"ok": False, "error": "拉取失败 —— " + "；".join(errs)[:400]}
 
 
 # ------------------------------------------------------------------ gemini native

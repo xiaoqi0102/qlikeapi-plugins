@@ -33,6 +33,25 @@ MASTER = os.environ["QLIKEAPI_UP_TOKEN"]
 MASTER_HEADERS = {"x-qlikeapi-token": MASTER}
 
 
+@pytest.fixture(autouse=True)
+def reset_relay_state():
+    """relay 的内存态是进程级单例（key 轮换指针/冷却、并发闸门），用例之间必须清干净。
+
+    不清的话：前一个用例把某渠道的 key 打进冷却 → 后一个用例莫名其妙收到 503。
+    """
+    from app import relay
+
+    def _clear():
+        relay._KEY_STATE.clear()
+        relay.gate._busy.clear()
+        relay.gate._waiting = 0
+        relay.gate.rejected = 0
+
+    _clear()
+    yield
+    _clear()
+
+
 @pytest.fixture()
 def db(tmp_path, monkeypatch):
     """每个用例一个干净的库。"""

@@ -8,6 +8,7 @@
 :root{
   --sidebar-w: 232px;
   --ink:#0f172a; --ink-2:#334155; --muted:#64748b; --line:#e6ebf2; --bg:#f5f7fb;
+  --surface:#ffffff; --field:#eef1f6; --brand-ink:#ffffff;
   --brand:#2f6bff; --brand-2:#1d4ed8; --ok:#16a34a; --warn:#d97706; --err:#dc2626;
   --nav:#0f172a; --nav-ink:#94a3b8;
   --radius:.75rem;
@@ -28,6 +29,7 @@
 body.dark{
   --bg:#0d1421; --ink:#e8edf5; --ink-2:#c2cbd9; --muted:#8494a8; --line:#243044; --line-2:#1e293b;
   --nav:#0a111e; --nav-ink:#8fa0b8;
+  --surface:#151d2c; --field:#101827; --brand-ink:#ffffff;
   --brand-soft:#16243c; --ok-soft:#12271d; --warn-soft:#2a2312; --err-soft:#2b1719;
   --sh-1:0 1px 2px rgba(0,0,0,.40);
   --sh-2:0 1px 3px rgba(0,0,0,.45), 0 8px 22px -12px rgba(0,0,0,.70);

@@ -322,6 +322,17 @@ const act = {
 
   copy(text) { copyText(text); },
 
+  /* 日志详情：curl 视图切换（多行/严格）+ 复制当前视图 */
+  curlMode(mode) {
+    UI.$$('[data-curl]').forEach(el => { el.style.display = (el.dataset.curl === mode) ? '' : 'none'; });
+    UI.$$('.seg[data-seg="curl"] button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+  },
+
+  copyCurl(target) {
+    const el = UI.$$('[data-curl]').find(e => e.dataset.target === target && e.style.display !== 'none');
+    if (el) copyText(el.textContent);
+  },
+
   /* -------------------- 批量操作（勾选渠道实例） -------------------- */
   batchPick(key, on) {
     state.pvSel = state.pvSel || {};
@@ -753,14 +764,26 @@ const act = {
         <div class="col-12"><label class="form-label">API key（多把 key 每行一个，自动轮换）</label>
           <textarea class="form-control" id="fKeys" placeholder="sk-xxxx&#10;sk-yyyy"></textarea>
           <div class="hint mt-1">${p ? '留空则不改动现有 key；当前：' + (p.keys||[]).map(k => k.masked).join(' / ') : ''}</div></div>
-        <div class="col-12"><label class="form-label">模型映射（JSON：{"客户端模型名": "上游真实名"}）</label>
-          <textarea class="form-control" id="fModels">${esc(p ? JSON.stringify(Object.fromEntries((p.models||[]).map(m => [m.id, m.upstream])), null, 2) : '{\n  "gpt-image-2": "openai/gpt-image-2"\n}')}</textarea></div>
+        <div class="col-12">
+          <div class="d-flex align-items-center justify-content-between mb-1" style="gap:8px;flex-wrap:wrap">
+            <label class="form-label mb-0">模型映射（JSON：{"客户端模型名": "上游真实名"}）</label>
+            <div class="acts">
+              <button class="btn btn-sm btn-outline-secondary" onclick="act.fetchUpModels()"><i class="ti ti-cloud-download"></i> 拉取上游模型</button>
+              <button class="btn btn-sm btn-outline-secondary" onclick="act.tidyModels()"><i class="ti ti-arrows-sort"></i> 整理去重</button>
+            </div>
+          </div>
+          <textarea class="form-control" id="fModels">${esc(p ? JSON.stringify(Object.fromEntries((p.models||[]).map(m => [m.id, m.upstream])), null, 2) : '{\n  "gpt-image-2": "openai/gpt-image-2"\n}')}</textarea>
+          <div class="hint mt-1">「拉取上游模型」是零成本 GET（只读上游 /v1/models，绝不出图）；重复命名的模型只保留一条。</div>
+          <div id="upModels" class="mt-2"></div>
+        </div>
         <div class="col-md-8"><label class="form-label">渠道微调 options（JSON，可选）</label>
           <textarea class="form-control" id="fOptions">${esc(JSON.stringify(p?.options || {}, null, 2))}</textarea>
           <div class="hint mt-1">drop_fields（支持点号路径，如 <code>generationConfig.thinkingConfig</code>）/ force_fields / generations_path / edits_path / image_size_override / drop_quality</div></div>
         <div class="col-md-4">
           <label class="form-label">优先级<span class="hint"> 数字大者优先</span></label><input class="form-control mb-3" id="fPrio" type="number" value="${p?.priority ?? 0}">
           <label class="form-label">权重<span class="hint"> 同优先级内按权重分流</span></label><input class="form-control mb-3" id="fWeight" type="number" min="1" value="${p?.weight ?? 1}">
+          <label class="form-label">并发上限<span class="hint"> 该渠道同时最多跑几个请求，0=不限</span></label><input class="form-control mb-3" id="fConc" type="number" min="0" value="${(p?.options || {}).max_concurrency || 0}">
+          <label class="form-label">同档重试<span class="hint"> 失败先在本优先级重试几次再降档，0=直接降档</span></label><input class="form-control mb-3" id="fRetry" type="number" min="0" max="2" value="${(p?.options || {}).retry || 0}">
           <label class="form-label">余额熔断站点<span class="hint"> 余额过低自动停用</span></label><select class="form-select mb-3" id="fSite">${siteOpts}</select>
           <label class="form-label">启用</label><select class="form-select" id="fEnabled">
             <option value="1" ${!p || p.enabled ? 'selected' : ''}>启用</option>
@@ -771,12 +794,97 @@ const act = {
        <button class="btn btn-primary" onclick="act.providerSave('${esc(key || '')}')">保存</button>`);
   },
 
+  /* -------------------- 模型映射：拉取上游模型列表（零成本 GET） -------------------- */
+
+  async fetchUpModels() {
+    const key = ($('#fKey').value || '').trim();
+    const host = $('#upModels');
+    if (!host) return;
+    if (!key) return toast('先填实例名并保存渠道，才能拉取上游模型', true);
+    host.innerHTML = '<div class="hint"><span class="spinner-border spinner-border-sm"></span> 正在向上游拉取模型列表（只读，不出图）…</div>';
+    const r = await api('/api/providers/' + encodeURIComponent(key) + '/fetch-models', { method: 'POST' });
+    if (!r) { host.innerHTML = ''; return; }
+    if (!r.ok) { host.innerHTML = `<div class="hint" style="color:var(--err)">${esc(r.data.error || '拉取失败')}</div>`; return; }
+    state.upLast = r.data;
+    act.renderUpModels(r.data, []);
+  },
+
+  renderUpModels(d, selected) {
+    const host = $('#upModels');
+    if (!host) return;
+    let have = {};
+    try { have = JSON.parse($('#fModels').value || '{}'); } catch { have = {}; }
+    const haveKeys = new Set(Object.keys(have));
+    const items = (d.models || []).map(m => ({ value: m, label: m, hint: haveKeys.has(m) ? '已在映射里' : '' }));
+    host.innerHTML = `<div class="d-flex align-items-center justify-content-between mb-1" style="gap:8px;flex-wrap:wrap">
+        <span class="hint">上游 <span class="mono">${esc(d.url)}</span> · 去重后 <b>${d.count}</b> 个模型</span>
+        <div class="acts">
+          <button class="btn btn-sm btn-outline-secondary" onclick="act.upModelsAll()">全选未添加</button>
+          <button class="btn btn-sm btn-primary" onclick="act.upModelsAdd()"><i class="ti ti-plus"></i> 加入映射</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="act.upModelsHide()">收起</button>
+        </div></div>
+      <div id="upPick"></div>`;
+    state._upPicker = UI.picker('#upPick', { items, selected: selected || [], search: true,
+      placeholder: '选择要加入映射的模型…', searchPlaceholder: '搜索模型名…' });
+  },
+
+  upModelsAll() {
+    let have = {};
+    try { have = JSON.parse($('#fModels').value || '{}'); } catch { have = {}; }
+    const rest = ((state.upLast && state.upLast.models) || []).filter(m => !(m in have));
+    if (state._upPicker) state._upPicker.set(rest);
+    toast(rest.length ? `已选中 ${rest.length} 个未添加的模型` : '没有可添加的模型了');
+  },
+
+  upModelsAdd() {
+    const pick = state._upPicker ? state._upPicker.values : [];
+    if (!pick.length) return toast('先选模型（可点「全选未添加」）', true);
+    let map = {};
+    try { map = JSON.parse($('#fModels').value || '{}'); } catch { map = {}; }
+    let added = 0;
+    pick.forEach(m => { if (!(m in map)) { map[m] = m; added++; } });     // 去重：已在映射里的跳过
+    const sorted = {};
+    Object.keys(map).sort().forEach(k => { sorted[k] = map[k]; });
+    $('#fModels').value = JSON.stringify(sorted, null, 2);
+    toast(added ? `已加入 ${added} 个模型（重复的已跳过）` : '选中的模型都已在映射里');
+    act.renderUpModels(state.upLast || { models: [], count: 0, url: '' }, pick);
+  },
+
+  upModelsHide() {
+    const host = $('#upModels');
+    if (host) host.innerHTML = '';
+    state._upPicker = null;
+  },
+
+  /* 整理：去空白、去重复、按名字排序（JSON 解析天然去重同名 key，这里再清一遍空值/对象写法） */
+  tidyModels() {
+    let map = {};
+    try { map = JSON.parse($('#fModels').value || '{}'); } catch { return toast('模型映射不是合法 JSON', true); }
+    const out = {};
+    let dropped = 0;
+    Object.keys(map).forEach((k) => {
+      const kk = String(k).trim();
+      const raw = map[k];
+      const vv = String(raw && typeof raw === 'object' ? (raw.upstream || '') : (raw == null ? '' : raw)).trim();
+      if (!kk || !vv || kk in out) { dropped++; return; }
+      out[kk] = vv;
+    });
+    const sorted = {};
+    Object.keys(out).sort().forEach(k => { sorted[k] = out[k]; });
+    $('#fModels').value = JSON.stringify(sorted, null, 2);
+    toast(dropped ? `已整理：去掉 ${dropped} 条空值/重复项` : '已整理并排序');
+  },
+
   async providerSave(existing) {
     const key = ($('#fKey').value || existing || '').trim();
     if (!key) return toast('实例名必填', true);
     let model_map, options;
     try { model_map = JSON.parse($('#fModels').value || '{}'); } catch { return toast('模型映射不是合法 JSON', true); }
     try { options = JSON.parse($('#fOptions').value || '{}'); } catch { return toast('options 不是合法 JSON', true); }
+    const conc = parseInt($('#fConc')?.value || '0', 10) || 0;      // 阶段 1：并发闸门
+    const rt = Math.min(2, parseInt($('#fRetry')?.value || '0', 10) || 0);  // 阶段 1：同档重试
+    if (conc > 0) options.max_concurrency = conc; else delete options.max_concurrency;
+    if (rt > 0) options.retry = rt; else delete options.retry;
     const body = {key, label: $('#fLabel').value.trim() || key, protocol: $('#fProto').value,
       base_url: $('#fBase').value.trim(), auth_mode: $('#fAuth').value, model_map, options,
       priority: parseInt($('#fPrio').value || '0', 10), weight: Math.max(1, parseInt($('#fWeight').value || '1', 10)),
@@ -993,19 +1101,60 @@ const act = {
     const r = await api('/api/logs/' + id);
     if (!r) return;
     const l = r.data;
-    const pretty = (s) => { try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s || '（空）'; } };
+    const parse = (x) => { try { return JSON.parse(x); } catch { return null; } };
+    // JSON 文本：multi=true 把字符串里的 \n 还原成真实换行（只看好读）；false 保持严格 JSON（可直接跑）
+    const jsonTxt = (x, multi) => {
+      let t;
+      try { t = JSON.stringify(JSON.parse(x), null, 2); } catch { t = x || '（空）'; }
+      return multi ? t.replace(/\\n/g, '\n').replace(/\\t/g, '  ') : t;
+    };
+    const q = (t) => "'" + String(t).replace(/'/g, "'\\''") + "'";     // shell 单引号转义
+    const curlOf = (url, method, headers, body) => {
+      const out = ['curl ' + q(url) + ' \\', '  --request ' + method];
+      Object.keys(headers).forEach((k) => {
+        out[out.length - 1] += ' \\';
+        out.push('  --header ' + q(k + ': ' + headers[k]));
+      });
+      out[out.length - 1] += ' \\';
+      out.push('  --data ' + q(body));
+      return out.join('\n');
+    };
+    const upUrl = l.upstream_url || '（老日志没记上游地址，升级后的新请求才有）';
+    const upHeaders = parse(l.upstream_headers) || {};
+    const upRead = curlOf(upUrl, l.upstream_method || 'POST', upHeaders, jsonTxt(l.upstream_request, true));
+    const upStrict = curlOf(upUrl, l.upstream_method || 'POST', upHeaders, jsonTxt(l.upstream_request, false));
+    const path = l.public_path || '/v1/images/generations';
+    const cliPath = /\/(generations|edits)$/.test(path) ? path : path + '/generations';
+    const cliHeaders = { 'Content-Type': 'application/json', Authorization: 'Bearer YOUR_QLIKE_TOKEN' };
+    const cliRead = curlOf(location.origin + cliPath, 'POST', cliHeaders, jsonTxt(l.request_json, true));
+    const cliStrict = curlOf(location.origin + cliPath, 'POST', cliHeaders, jsonTxt(l.request_json, false));
+    const seg = `<div class="seg" data-seg="curl">
+        <button class="on" data-mode="readable" onclick="act.curlMode('readable')">提示词多行</button>
+        <button data-mode="strict" onclick="act.curlMode('strict')">严格 JSON</button></div>`;
+    const curlBox = (target, title, read, strict) => `
+      <div class="d-flex align-items-center justify-content-between mb-1" style="gap:8px;flex-wrap:wrap">
+        <label class="form-label mb-0">${title}</label>
+        <div class="acts">${seg}
+          <button class="btn btn-sm btn-outline-secondary" onclick="act.copyCurl('${target}')"><i class="ti ti-clipboard"></i> 复制</button></div>
+      </div>
+      <pre class="json mb-3" data-curl="readable" data-target="${target}">${esc(read)}</pre>
+      <pre class="json mb-3" data-curl="strict" data-target="${target}" style="display:none">${esc(strict)}</pre>`;
     modal(`日志 #${id}`, `
       <div class="row mb-3">
         ${l.http_status < 400 ? pill('ok', 'HTTP ' + l.http_status) : pill('err', 'HTTP ' + l.http_status)}
         ${pill('', '上游 ' + (l.upstream_status ?? '—'))} ${pill('', fmtMs(l.ms))}
-        ${pill('info', l.provider)} <span class="chip mono">${esc(l.model||'')}</span>
+        ${pill('info', l.provider)} <span class="chip mono">${esc(l.model || '')}</span>
         ${l.attempts ? pill('warn', '尝试 ' + l.attempts + ' 次') : ''}
         ${l.key_index != null ? `<span class="chip mono">key #${l.key_index}</span>` : ''}
+        <span class="chip mono">${esc(l.public_path || '')}</span>
       </div>
       ${l.error ? `<label class="form-label">错误</label><pre class="json mb-3">${esc(l.error)}</pre>` : ''}
-      <label class="form-label">客户端请求</label><pre class="json mb-3">${esc(pretty(l.request_json))}</pre>
-      <label class="form-label">发给上游的请求（翻译后）</label><pre class="json mb-3">${esc(pretty(l.upstream_request))}</pre>
-      <label class="form-label">响应片段</label><pre class="json">${esc(pretty(l.response_snippet))}</pre>`);
+      ${curlBox('up', '完整请求 · 本网关 → 上游（凭据已换成 YOUR_API_KEY，可直接复制去实测）', upRead, upStrict)}
+      ${curlBox('cli', '完整请求 · 客户端 → 本网关（同一条请求的入口形态）', cliRead, cliStrict)}
+      <div class="hint mb-3">「提示词多行」把 JSON 字符串里的 \\n 还原成真实换行，方便读；要直接粘贴执行请切「严格 JSON」。</div>
+      <label class="form-label">客户端请求（原始报文）</label><pre class="json mb-3">${esc(jsonTxt(l.request_json, false))}</pre>
+      <label class="form-label">发给上游的请求（翻译后 · 原始报文）</label><pre class="json mb-3">${esc(jsonTxt(l.upstream_request, false))}</pre>
+      <label class="form-label">响应片段</label><pre class="json">${esc(jsonTxt(l.response_snippet, false))}</pre>`);
   },
 
   /* -------------------- 异步任务 -------------------- */
@@ -1158,6 +1307,12 @@ const act = {
           <span class="chip">已加密 ${d.enc.encrypted}</span>
           ${d.enc.plaintext ? `<span class="chip warn">明文残留 ${d.enc.plaintext}（保存一次即自动加密）</span>` : ''}
           ${d.enc.broken ? `<span class="chip warn">解不开 ${d.enc.broken}（QLIKEAPI_SECRET 变过？重新填一次密钥）</span>` : ''}</td></tr>` : ''}
+        ${d.gate ? `<tr><th>并发闸门</th><td>全局上限 <b>${d.gate.global_limit || '不限'}</b> · 排队等待 <b>${d.gate.queue_wait}s</b> · 队列上限 <b>${d.gate.max_waiting}</b>；
+          当前占用 ${Object.keys(d.gate.busy || {}).length ? Object.entries(d.gate.busy).map(([k, v]) => `<span class="chip mono">${esc(k)} ${v}</span>`).join(' ') : '—'}；
+          排队中 <b>${d.gate.waiting}</b> · 累计拒绝 <b>${d.gate.rejected}</b>
+          <div class="hint">渠道级上限在「渠道实例 → 编辑 → 并发上限」里配；全局上限用环境变量 QLIKEAPI_MAX_CONCURRENCY（0=不限）</div></td></tr>` : ''}
+        ${d.router ? `<tr><th>路由决策</th><td>一条请求最多打 <b>${d.router.max_attempts}</b> 次上游；可重试状态码 <span class="mono">${(d.router.retryable || []).join(' ')}</span>
+          <div class="hint">响应头 X-QLike-Provider / X-QLike-Failover / X-QLike-Chain / X-QLike-Attempt / X-QLike-Degrade / X-QLike-Queue-Ms 可逐请求对账</div></td></tr>` : ''}
         ${d.breaker ? `<tr><th>自动熔断</th><td>连续失败 <b>${d.breaker.after}</b> 次 → 自动停用并放回兜底；
           <b>${Math.round(d.breaker.cooldown / 60)}</b> 分钟后自动恢复（探活通过才恢复）</td></tr>` : ''}
         <tr><th>余额熔断</th><td>站点余额低于「预警线」→ 自动停用关联渠道（在渠道实例里选「关联站点」才会跟余额联动）</td></tr>

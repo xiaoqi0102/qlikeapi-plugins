@@ -32,7 +32,7 @@ from . import admin, channels, relay, store
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 
-app = FastAPI(title="qlikeapi-plugins", version="3.4.1")
+app = FastAPI(title="qlikeapi-plugins", version="3.5.0")
 app.include_router(relay.router, prefix="/up", tags=["upstream"])
 app.include_router(relay.router_v1, prefix="/v1", tags=["router"])   # 统一入口：New API 只挂这一个渠道
 app.include_router(admin.router, tags=["admin"])

@@ -105,7 +105,22 @@ Acquire(ctx, enabled bool, limit int, wait bool, timeout time.Duration, maxWaiti
 
 > 每阶段遵守既有铁律：**部署 → 零成本验证 → 截图**；不引入真实出图；密钥不落库；SQLite 不变；侧边栏结构不变。
 
-### 阶段 1（P0）：降级语义 + 并发闸门 + 决策可见
+### 阶段 1（P0）：降级语义 + 并发闸门 + 决策可见 —— ✅ **已实现（v3.5.0，2026-09-18）**
+
+**落地结果与初稿的差异（以代码为准）**
+
+| 初稿 | 实际实现 | 原因 |
+|---|---|---|
+| 渠道级 + **模型级**并发上限 | **渠道级 + 全局**（`options.max_concurrency` / `QLIKEAPI_MAX_CONCURRENCY`） | 模型级要维护 (渠道 × 模型) 二维计数，收益不抵复杂度；渠道级已能护住上游 |
+| 拒绝返回 **429** + `Retry-After` | **503** + `Retry-After: 3` | 我们是在「请求还没打到上游」时拒，语义是服务暂不可用；客户端退避行为一致 |
+| `queue_timeout_ms` / `queue_max_waiting` | `QLIKEAPI_QUEUE_WAIT`（秒）/ `QLIKEAPI_MAX_WAITING` | 与项目其它环境变量命名风格统一 |
+| 档内重试（New API `priorities[retry]`） | 渠道 `options.retry`（0-2，默认 **0 = 直接降档**） | 图片生成重试有重复扣费风险，默认保守，需要时按渠道开 |
+| 响应头含 `X-QLike-Size-Adjusted` | **暂未加** | 尺寸吸附已在「请求日志 → 详情」逐字段对照（客户端报文 vs 上游报文），够用 |
+| `/v1/route-preview` 返回分档链 + 面板可视化 | **未做**（仍是线性链） | 挪到阶段 2 和健康画像一起做，避免面板改两遍 |
+
+**已落地的接口/参数**：`_Gate`（槽位/排队/队列上限/超时，`relay.gate.stats()` 在 `/api/sysinfo` 可见）；
+`_tiers()` / `_tier_retry()` / `_attempt_sequence()`；响应头 `X-QLike-Chain` / `Attempt` / `Degrade` / `Queue-Ms`；
+并发占满 → 503 + `Retry-After`，且**路由层会先换下一家**（某家排队超时不再硬等）。
 
 1. **重试降级链**（照 New API 语义）
    - 候选渠道按 `priority` 去重成档，`attempt N` 用第 N 档；档内加权随机（权重 = `weight`，基础权重 10）。

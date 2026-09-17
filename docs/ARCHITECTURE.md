@@ -121,6 +121,26 @@ main ──► relay ──► channels ──► protocols ──► utils
 - 恢复必须**探活通过**，不是「冷却到期就无条件放回」——避免一放回就又失败。
 - 探活是**零成本**的（见下节）。
 
+### 并发闸门（v3.5.0）
+
+```
+请求 → 候选链（按优先级分档）→ 每档按权重随机 → 逐个候选：
+        闸门 acquire(渠道, 上限) ──拒绝──► 换下一个候选（降低单点依赖）
+              │ 拿到槽位
+              ▼
+        打上游 ──成功──► 回图（finally 释放槽位）
+              │ 失败（429/402/5xx/连接失败）
+              ▼
+        下一个候选；同档可重试 options.retry 次；全部失败 → 最后一家的错误原样返回
+```
+
+- 上限取值：渠道 `options.max_concurrency` ＞ 全局 `QLIKEAPI_MAX_CONCURRENCY`；`0` = 不限（默认关闭，行为与老版本一致）。
+- 排队：最多 `QLIKEAPI_QUEUE_WAIT` 秒，等待队列超过 `QLIKEAPI_MAX_WAITING` 直接拒；**所有候选都占满**才返回 `503 + Retry-After`。
+- 计数是进程内单例（单实例 SQLite 部署足够）；将来要多实例时把 `_Gate` 换成共享计数即可，接口不变。
+- 决策全程可见：`X-QLike-Chain` / `X-QLike-Attempt` / `X-QLike-Degrade` / `X-QLike-Queue-Ms`。
+
+
+
 ## 5. 零成本探活（本项目最重要的一条工程约束）
 
 探活/自检**绝不能**产生真实出图与计费。实现方式：

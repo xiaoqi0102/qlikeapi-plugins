@@ -26,6 +26,10 @@
 | `QLIKEAPI_PROBE_TIMEOUT` | `12` | **探活硬超时**（秒）。必须保留：挂起的上游不能把探活卡死 |
 | `QLIKEAPI_AUTO_DISABLE_AFTER` | `5` | 连续失败多少次自动停用该渠道 |
 | `QLIKEAPI_AUTO_RECOVER_SEC` | `600` | 熔断后最短冷却时间（秒）；到点后仍需**探活通过**才恢复 |
+| `QLIKEAPI_MAX_CONCURRENCY` | `0` | **并发闸门全局上限**（同时在跑的转发请求数）。`0`＝不限（默认，行为与老版本一致）。渠道级上限优先于它 | 
+| `QLIKEAPI_QUEUE_WAIT` | `30` | 拿不到并发槽位时最多排队多少秒；等不到就拒绝（路由层会先换下一家，全部占满才 503 + `Retry-After`） |
+| `QLIKEAPI_MAX_WAITING` | `32` | 等待队列上限，超过直接拒（防止请求无限堆积把内存吃光） |
+| `QLIKEAPI_MAX_ROUTE_ATTEMPTS` | `6` | 一条请求最多打几次上游（含同档重试与降级换家） |
 | `QLIKEAPI_IMPORT_ENV` | 空 | 只读挂载的宿主机 `.env` 路径，控制台「从 .env 导入站点」会读它 |
 
 密钥生成：
@@ -62,6 +66,9 @@ openssl rand -hex 24      # 每个密钥单独生成一次，别复用
 | `drop_quality` | 直接删掉 `quality`（个别上游不认这个字段） |
 | `generations_path` / `edits_path` | 覆盖同步面路径（如 change2pro 的 image2 面**没有 `/v1`** 前缀） |
 | `image_size_override` | 强制 Gemini 面的尺寸档：`"1K"` / `"2K"` / `"4K"` |
+| `max_concurrency` | **该渠道的并发上限**（同时最多几个请求在跑）。不填则用全局 `QLIKEAPI_MAX_CONCURRENCY`；两者都是 0＝不限。控制台「渠道实例 → 编辑 → 并发上限」直接填 |
+| `retry` | **同档重试次数**（0-2，默认 0）：失败先在同一优先级档里重试几次再降档。图片生成重试有重复扣费风险，默认直接降档 |
+| `models_path` | 拉取上游模型列表的路径（默认 `/v1/models`，其次试 `/models`）—— 控制台渠道弹窗「拉取上游模型」用它 |
 | `unify_model` | 设 `false` → 响应里保留上游真实模型名（排查用，默认统一成客户端请求的名字） |
 
 **异步面（fal）的端点不在 `options` 里**，而是写在「模型映射」的每条记录上：

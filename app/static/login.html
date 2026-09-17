@@ -6,6 +6,7 @@
 <title>登录 · QlikeAPI</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="stylesheet" href="/static/vendor/tabler-icons/tabler-icons.min.css">
+<link rel="stylesheet" href="/static/css/tokens.css">
 <link rel="stylesheet" href="/static/css/login.css">
 </head>
 <body class="lg-body">
@@ -50,6 +51,18 @@
   <div class="lg-foot">© 2026 QlikeAPI. All rights reserved.</div>
 </div>
 
+<script>
+// 深色模式：跟随系统偏好（配色仍由 tokens.css 的 body.dark 变量决定）
+(function () {
+  try {
+    var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.body.classList.toggle('dark', !!dark);
+    if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
+      document.body.classList.toggle('dark', e.matches);
+    });
+  } catch (e) {}
+})();
+</script>
 <script>
 (function () {
   var f = document.getElementById('f');

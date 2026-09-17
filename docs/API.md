@@ -171,10 +171,13 @@ curl -s -X POST "http://127.0.0.1:18673/up/change2pro/v1/images/preview" \
 
 ### 日志 / 统计 / 用量
 
+> 面板「请求日志 → 详情」会把上游请求拼成**可直接复制的 curl**（客户端 → 本网关、本网关 → 上游两条），
+> 提示词按多行展示（可切回严格 JSON 再复制去实测）。
+
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/logs?limit=50&offset=0` | 请求日志（支持按令牌、渠道、类型筛选） |
-| GET | `/api/logs/{id}` | 单条详情（含上游报文摘要） |
+| GET | `/api/logs/{id}` | 单条详情：客户端报文 + **发给上游的完整请求**（`upstream_url` / `upstream_method` / `upstream_headers`，密钥写成 `YOUR_API_KEY` 占位符）+ 响应片段 |
 | GET | `/api/stats?days=7` | 概览 KPI：今日 / 24h / 总计 + 逐小时曲线 |
 | GET | `/api/usage?days=7` | 用量统计：汇总 + 按天序列（请求数/张数/花费/耗时） |
 | GET | `/api/usage.csv?days=7` | 导出 CSV |
