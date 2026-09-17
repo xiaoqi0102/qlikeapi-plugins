@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 安装依赖
+        run: pip install -r requirements-dev.txt
+      - name: ruff
+        run: ruff check app tests scripts
+
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: 安装依赖
+        run: pip install -r requirements-dev.txt
+      - name: 跑测试（零网络：CI 里没有任何上游密钥）
+        run: pytest -q --cov=app --cov-report=term-missing
+        env:
+          # 测试用的假密钥，只为让 store/crypto 能初始化；不代表任何真实凭据
+          QLIKEAPI_SECRET: ci-secret-not-real
+          QLIKEAPI_UP_TOKEN: ci-master-not-real
+          QLIKEAPI_ADMIN_USER: ci
+          QLIKEAPI_ADMIN_PASS: ci-pass-not-real
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建镜像（不推送）
+        run: docker build -t qlikeapi-plugins:ci .
+      - name: 冒烟：容器能起来且 /healthz 通
+        run: |
+          docker run -d --name ci-smoke -p 18673:18673 \
+            -e QLIKEAPI_SECRET=ci-secret-not-real \
+            -e QLIKEAPI_UP_TOKEN=ci-master-not-real \
+            -e QLIKEAPI_ADMIN_PASS=ci-pass-not-real \
+            -e QLIKEAPI_DB=/tmp/ci.db \
+            qlikeapi-plugins:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18673/healthz > /tmp/health.json; then break; fi
+            sleep 1
+          done
+          cat /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+          docker logs ci-smoke | tail -20
