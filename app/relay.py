@@ -301,6 +301,14 @@ def _redact_headers(headers: dict, secret: str | None = None) -> dict:
     return out
 
 
+def _size_info(meta: dict) -> dict:
+    """尺寸换算结果：中文说明给面板/日志，纯 ASCII 给响应头（HTTP 头不能放中文）。"""
+    if not (meta or {}).get("size_hdr"):
+        return {}
+    return {"size_from": meta.get("size_from"), "size_to": meta.get("size_to"),
+            "size_note": meta.get("size_note"), "size_hdr": meta.get("size_hdr")}
+
+
 def _countable_failure(status: int | None) -> bool:
     """这次失败要不要算到「渠道连续失败」里（够数就自动停用该渠道）。"""
     if status is None:                 # 连接失败/超时
@@ -385,7 +393,8 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
                           token=tk_name, token_id=tk_id,
                           up_url=url, up_method="POST", up_headers=_redact_headers(headers, secret))
         return out, {"ms": int((time.time() - t0) * 1000), "upstream_status": status,
-                     "images": images, "cost": cost, "currency": currency, "attempts": attempt}
+                     "images": images, "cost": cost, "currency": currency, "attempts": attempt,
+                     **_size_info(meta)}
 
     msg = f"渠道 '{provider}' 所有 key 均不可用或已进冷却"
     if last:
@@ -562,6 +571,8 @@ def _handle(provider: str, request: Request, edit: bool, dry: bool = False, prob
     resp.headers["X-QLike-Provider"] = provider
     resp.headers["X-QLike-Attempt"] = "1"
     resp.headers["X-QLike-Queue-Ms"] = str(queue_ms)
+    if info.get("size_hdr"):
+        resp.headers["X-QLike-Size"] = info["size_hdr"]      # 尺寸被换过 → 明确告诉客户端
     return resp
 
 
@@ -658,6 +669,8 @@ def _handle_router(request: Request, edit: bool):
                 snippet["failed_over_from"] = tried
             if saturated:
                 snippet["saturated"] = saturated
+            if info.get("size_note"):
+                snippet["size"] = info["size_note"]
             store.log_row("-", model, "/v1/images", 200, None, int((time.time() - t0) * 1000),
                           None, body, None, json.dumps(snippet, ensure_ascii=False),
                           kind="router", attempts=attempt)
@@ -668,6 +681,8 @@ def _handle_router(request: Request, edit: bool):
             resp.headers["X-QLike-Attempt"] = str(attempt)
             resp.headers["X-QLike-Degrade"] = str(tier_idx)     # 0 = 首档即成功，没降级
             resp.headers["X-QLike-Queue-Ms"] = str(queue_ms)
+            if info.get("size_hdr"):
+                resp.headers["X-QLike-Size"] = info["size_hdr"]
             return resp
         tried.append(p["key"])
         try:

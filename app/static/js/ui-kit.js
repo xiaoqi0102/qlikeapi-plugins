@@ -154,10 +154,21 @@
   /** 空状态（虚线框 + 图标 + 一句引导语，必须给下一步动作） */
   UI.empty = (text, icon) => '<div class="empty"><i class="ti ' + (icon || 'ti-inbox') + '"></i>' + UI.esc(text) + '</div>';
 
-  /** 紧凑表格：heads 为表头数组，rows 为二维 HTML 数组 */
-  UI.table = (heads, rows) =>
-    '<div class="table-wrap"><table class="tb"><thead><tr>' + heads.map((h) => '<th>' + h + '</th>').join('') + '</tr></thead>' +
-    '<tbody>' + rows.map((r) => '<tr>' + r.map((c) => '<td>' + c + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>';
+  /** 紧凑表格：heads 为表头数组，rows 为二维 HTML 数组
+   *  opts.widths  每列宽度（如 ['19%','24%']）—— 同一页多张表传同一组宽度才会纵向对齐
+   *  opts.cls     表格附加类名（配合 CSS 的 table-layout:fixed）
+   *  opts.hcls/ccls 逐列类名（数字列右对齐、居中列等）
+   */
+  UI.table = (heads, rows, opts) => {
+    const o = opts || {};
+    const cols = (o.widths && o.widths.length)
+      ? '<colgroup>' + o.widths.map((w) => '<col style="width:' + w + '">').join('') + '</colgroup>' : '';
+    const hcls = o.hcls || [], ccls = o.ccls || [];
+    return '<div class="table-wrap"><table class="tb' + (o.cls ? ' ' + o.cls : '') + '">' + cols +
+      '<thead><tr>' + heads.map((h, i) => '<th' + (hcls[i] ? ' class="' + hcls[i] + '"' : '') + '>' + h + '</th>').join('') + '</tr></thead>' +
+      '<tbody>' + rows.map((r) => '<tr>' + r.map((c, i) => '<td' + (ccls[i] ? ' class="' + ccls[i] + '"' : '') + '>' + c + '</td>').join('') + '</tr>').join('') +
+      '</tbody></table></div>';
+  };
 
   /** 骨架屏表格：加载中用，cols/rows 与真实表格对齐以免跳动 */
   UI.skelTable = function (cols, rows, opts) {

@@ -150,6 +150,10 @@ curl -s localhost:18673/healthz     # {"ok":true,...}
 ![组件库](docs/images/6-ui-kit.jpg)
 ![日志完整请求](docs/images/9-log-curl.jpg)
 ![拉取上游模型](docs/images/10-fetch-models.jpg)
+
+![尺寸换算器](docs/images/11-size-plan.jpg)
+
+![模型目录列对齐](docs/images/12-models-aligned.jpg)
 *组件库展示页 `/ui-kit`：改 UI 前先在这里找现成组件*
 
 </div>
@@ -250,6 +254,7 @@ make test && make lint
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | 全部环境变量、令牌、价格与余额取数配置 |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker 部署、反代、接入 New API、备份升级回滚 |
 | [docs/SMART-ROUTING-PLAN.md](docs/SMART-ROUTING-PLAN.md) | 智能路由与负载/并发控制调研（New API / Sub2API）+ 整合规划 |
+| [docs/SIZE-MAPPING.md](docs/SIZE-MAPPING.md) | **尺寸换算规则**：客户端像素 → 上游实际尺寸（GPT 自由尺寸四条硬限制、Gemini 档位×比例像素表，均附官方出处） |
 | [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) | UI 设计规范：设计变量、组件库清单、交互约定、变更流程与坑清单 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 已做 / 计划 / **明确不做**（含理由） |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |

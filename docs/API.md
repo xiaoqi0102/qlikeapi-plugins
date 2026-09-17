@@ -24,6 +24,14 @@ x-qlikeapi-token: <主密钥或访问令牌>
 
 ## 1. 统一入口
 
+### 响应头（统一入口）
+
+| 头 | 含义 |
+|---|---|
+| `X-QLike-Provider` / `X-QLike-Failover` | 实际出图的渠道 / 是否换过家 |
+| `X-QLike-Chain` / `X-QLike-Attempt` / `X-QLike-Degrade` / `X-QLike-Queue-Ms` | 候选链 / 尝试次数 / 降了几档 / 排队耗时 |
+| `X-QLike-Size` | **尺寸被换算过时才有**：`原尺寸->实际尺寸`（Gemini 面附档位，如 `1920x1080->2752x1536 (16:9@2K)`）；规则见 [`SIZE-MAPPING.md`](SIZE-MAPPING.md) |
+
 ### `POST /v1/images/generations`
 
 标准 OpenAI 图片生成接口。请求体（JSON）：
@@ -191,7 +199,9 @@ curl -s -X POST "http://127.0.0.1:18673/up/change2pro/v1/images/preview" \
 | GET | `/api/meta/options` | 下拉选项：`models[]`（统一模型名 + 可用渠道数 + 上游真名）、`providers[]`（渠道 key/标签/启停）；供令牌弹窗的多选选择器使用 |
 | GET / POST | `/api/prices` | 单价表（`model`,`provider`,`price`,`currency`,`source`） |
 | POST | `/api/prices/sync` | 从 New API 同步价格口径 |
+| POST | `/api/prices/prune` | 清理**孤儿价**（`provider` 已不存在的遗留行），返回 `{removed, items}`；删渠道时已自动级联清理，这里是兜底 |
 | DELETE | `/api/prices/{id}` | 删一条价格 |
+| GET | `/api/size-plan?model=&size=&policy=` | **尺寸换算**（纯计算、零成本、不出图）：返回 `{size, final, changed, family, ratio, tier, policy, note, rules?, allowed?}`。GPT 系按最小改动吸附；Gemini 系返回档位/比例与**实际输出像素**。`policy` = `class`（默认）/`floor`/`nearest`/`ceil` |
 | GET | `/api/sites` / `/api/sites/types` | 站点余额与取数器类型 |
 | POST | `/api/sites` | 新建/更新站点（含 `warn_line` 余额预警线） |
 | POST | `/api/sites/{id}/check` | 查这一个站点的余额 |
@@ -206,7 +216,7 @@ curl -s -X POST "http://127.0.0.1:18673/up/change2pro/v1/images/preview" \
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/healthz` | `{"ok":true,"app":"qlikeapi-plugins","version":"3.3.0","plugins":[…],"plugin_errors":{},"providers":[…]}` |
+| GET | `/healthz` | `{"ok":true,"app":"qlikeapi-plugins","version":"3.6.0","plugins":[…],"plugin_errors":{},"providers":[…]}` |
 | GET | `/` | 控制台页面（未登录跳 `/login`） |
 | GET | `/static/*` | 前端静态资源 |
 

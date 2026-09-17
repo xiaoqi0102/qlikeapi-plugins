@@ -270,6 +270,8 @@ const act = {
            <input class="form-control form-control-sm" id="pPrice" type="number" step="0.0001" placeholder="元/张" style="width:120px">
            <input class="form-control form-control-sm" id="pNote" placeholder="备注" style="width:170px">
            <button class="btn btn-sm btn-primary" onclick="act.addPrice()"><i class="ti ti-plus"></i> 添加/更新</button>
+           <button class="btn btn-sm btn-outline-secondary" onclick="act.prunePrices()"><i class="ti ti-eraser"></i> 清理孤儿价</button>
+           <span class="hint">孤儿价 = 渠道被删掉/改名后遗留的专属价（删渠道时本服务已自动级联清理，这里是兜底）。</span>
          </div>`;
   },
 
@@ -279,6 +281,15 @@ const act = {
     const r = await api('/api/prices', {method:'POST', body: {model, provider: $('#pProvider').value.trim() || '*',
       price: parseFloat($('#pPrice').value || '0'), note: $('#pNote').value.trim()}});
     if (r && r.ok) { toast('已保存单价'); act.loadUsage(); } else toast('保存失败', true);
+  },
+
+  async prunePrices() {
+    if (!(await UI.confirm('清理「渠道已不存在」的遗留单价行？', {okText: '清理'}))) return;
+    const r = await api('/api/prices/prune', {method:'POST'});
+    if (!r) return;
+    const n = (r.data || {}).removed || 0;
+    toast(n ? `已清理 ${n} 条孤儿单价` : '没有孤儿单价，都是干净的了');
+    act.loadUsage();
   },
 
   async delPrice(id) {
@@ -778,12 +789,16 @@ const act = {
         </div>
         <div class="col-md-8"><label class="form-label">渠道微调 options（JSON，可选）</label>
           <textarea class="form-control" id="fOptions">${esc(JSON.stringify(p?.options || {}, null, 2))}</textarea>
-          <div class="hint mt-1">drop_fields（支持点号路径，如 <code>generationConfig.thinkingConfig</code>）/ force_fields / generations_path / edits_path / image_size_override / drop_quality</div></div>
+          <div class="hint mt-1">drop_fields（支持点号路径，如 <code>generationConfig.thinkingConfig</code>）/ force_fields / generations_path / edits_path / image_size_override / drop_quality / gemini_size_policy（class|floor|nearest|ceil）</div></div>
         <div class="col-md-4">
           <label class="form-label">优先级<span class="hint"> 数字大者优先</span></label><input class="form-control mb-3" id="fPrio" type="number" value="${p?.priority ?? 0}">
           <label class="form-label">权重<span class="hint"> 同优先级内按权重分流</span></label><input class="form-control mb-3" id="fWeight" type="number" min="1" value="${p?.weight ?? 1}">
           <label class="form-label">并发上限<span class="hint"> 该渠道同时最多跑几个请求，0=不限</span></label><input class="form-control mb-3" id="fConc" type="number" min="0" value="${(p?.options || {}).max_concurrency || 0}">
           <label class="form-label">同档重试<span class="hint"> 失败先在本优先级重试几次再降档，0=直接降档</span></label><input class="form-control mb-3" id="fRetry" type="number" min="0" max="2" value="${(p?.options || {}).retry || 0}">
+          <label class="form-label">Gemini 档位策略<span class="hint"> Gemini 只能给「档位+比例」</span></label><select class="form-select mb-3" id="fGeminiPolicy">
+            ${[['class','按档位分类（默认）'],['floor','向下取档（最省）'],['nearest','取最接近档'],['ceil','向上取档（不降级）']].map(([v, t]) =>
+              `<option value="${v}" ${(((p?.options || {}).gemini_size_policy) || 'class') === v ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
           <label class="form-label">余额熔断站点<span class="hint"> 余额过低自动停用</span></label><select class="form-select mb-3" id="fSite">${siteOpts}</select>
           <label class="form-label">启用</label><select class="form-select" id="fEnabled">
             <option value="1" ${!p || p.enabled ? 'selected' : ''}>启用</option>
@@ -885,6 +900,8 @@ const act = {
     const rt = Math.min(2, parseInt($('#fRetry')?.value || '0', 10) || 0);  // 阶段 1：同档重试
     if (conc > 0) options.max_concurrency = conc; else delete options.max_concurrency;
     if (rt > 0) options.retry = rt; else delete options.retry;
+    const gp = $('#fGeminiPolicy') ? $('#fGeminiPolicy').value : 'class';   // Gemini 档位策略
+    if (gp && gp !== 'class') options.gemini_size_policy = gp; else delete options.gemini_size_policy;
     const body = {key, label: $('#fLabel').value.trim() || key, protocol: $('#fProto').value,
       base_url: $('#fBase').value.trim(), auth_mode: $('#fAuth').value, model_map, options,
       priority: parseInt($('#fPrio').value || '0', 10), weight: Math.max(1, parseInt($('#fWeight').value || '1', 10)),
@@ -986,6 +1003,12 @@ const act = {
   },
 
   /* -------------------- 模型目录 -------------------- */
+  // 三张表共用同一组列宽（table-layout:fixed + colgroup）—— 否则每张表各算各的列宽，
+  // 「真实单价 / 价格来源」两列会上下错位（用户反馈的正是这个）。
+  DIRCOLS: {widths: ['19%', '24%', '11%', '28%', '9%', '9%'],
+            hcls: ['', '', 'num-col', 'src-col', 'ctr', 'ctr'],
+            ccls: ['', '', 'num-col', 'src-col', 'ctr', 'ctr'], cls: 'tb-dir'},
+
   async loadModels() {
     const r = await api('/api/models');
     if (!r) return;
@@ -1002,17 +1025,45 @@ const act = {
             const src = SRC[m.source] || ['', m.source || '未定价'];
             const money = m.price == null ? '<span class="hint">未定价</span>'
               : `<b class="num">${m.currency === 'USD' ? '$' : '¥'}${Number(m.price).toFixed(4)}</b><span class="hint"> /张</span>`;
-            return [`<span class="mono">${esc(m.model)}</span>`, `<span class="mono">${esc(m.upstream)}</span>`,
-              money, pill(src[0], src[1]) + (m.price_note ? `<div class="hint" style="max-width:260px">${esc(m.price_note)}</div>` : ''),
+            return [`<span class="mono" title="${esc(m.model)}">${esc(m.model)}</span>`,
+              `<span class="mono" title="${esc(m.upstream)}">${esc(m.upstream)}</span>`,
+              money, pill(src[0], src[1]) + (m.price_note ? `<span class="src-note" title="${esc(m.price_note)}">${esc(m.price_note)}</span>` : ''),
               m.aliased ? pill('warn', '是') : pill('', '否'),
-              m.operations.map(o => `<span class="chip">${o}</span>`).join(' ')];
-          }))}</div>
+              m.operations.map(o => `<span class="chip">${o}</span>`).join(' ')]
+          }), act.DIRCOLS)}</div>
       </div>`).join('')
-      + `<div class="panel" style="box-shadow:none"><div class="body row">
-           <button class="btn btn-sm btn-primary" onclick="act.syncPrices(this)"><i class="ti ti-cloud-download"></i> 从上游同步真实价格</button>
-           <span class="hint">上游实测 = 用站点 /v1/usage 里的累计消耗 ÷ 请求数算出；与「New API 的 ModelPrice」币种可能不同，故分列展示。</span>
+      + `<div class="panel" style="box-shadow:none"><div class="body">
+           <div class="row align-items-end" style="gap:8px">
+             <div><label class="form-label">尺寸换算（零成本，不出图）</label>
+               <input class="form-control form-control-sm" id="spModel" placeholder="模型名，如 gemini-3.1-flash-image" style="width:280px"></div>
+             <div><label class="form-label">客户端请求尺寸</label>
+               <input class="form-control form-control-sm" id="spSize" value="1920x1080" style="width:140px"></div>
+             <div><label class="form-label">Gemini 档位策略</label>
+               <select class="form-select form-select-sm" id="spPolicy" style="width:190px">
+                 <option value="class">按档位分类（默认）</option><option value="floor">向下取档（最省）</option>
+                 <option value="nearest">取最接近档</option><option value="ceil">向上取档（不降级）</option></select></div>
+             <button class="btn btn-sm btn-primary" onclick="act.sizePlan()"><i class="ti ti-ruler-measure"></i> 换算</button>
+             <button class="btn btn-sm btn-outline-secondary" onclick="act.syncPrices(this)"><i class="ti ti-cloud-download"></i> 从上游同步真实价格</button>
+           </div>
+           <div id="spOut" class="mt-2"><span class="hint">填模型名 + 尺寸，看本服务最终会发给上游什么：GPT 系走「最小改动吸附」，Gemini 系只能给「档位 + 宽高比」，实际输出像素见结果。</span></div>
          </div></div>`
       : emptyBox('还没有配置任何模型', 'ti-sitemap');
+  },
+
+  async sizePlan() {
+    const model = ($('#spModel').value || '').trim();
+    const size = ($('#spSize').value || '').trim();
+    const policy = $('#spPolicy').value;
+    const r = await api(`/api/size-plan?model=${encodeURIComponent(model)}&size=${encodeURIComponent(size)}&policy=${policy}`);
+    if (!r) return;
+    const d = r.data || {};
+    if (d.error) { $('#spOut').innerHTML = `<span class="t-err">${esc(d.error)}</span>`; return; }
+    $('#spOut').innerHTML = `<div class="kvline">${pill(d.changed ? 'warn' : 'ok', d.changed ? '会被换算' : '原样透传')}
+        <span class="mono">${esc(d.size)}</span> <i class="ti ti-arrow-right"></i> <b class="mono">${esc(d.final)}</b>
+        ${d.tier ? pill('info', `${esc(d.ratio)} · ${esc(d.tier)}`) : ''}</div>
+      <div class="hint mt-1">${esc(d.note || '')}</div>
+      ${d.rules ? `<div class="hint">GPT 自由尺寸规则：宽高均为 16 的倍数 · 长短边比 ≤ 3:1 · 任一边 ≤ 3840 · 总像素 655,360~8,294,400（出处：Azure OpenAI《GPT image models》）；> 2560x1440 属实验档。</div>` : ''}
+      ${d.allowed ? `<div class="hint">该模型只接受：${d.allowed.map(x => `<span class="chip mono">${x}</span>`).join(' ')}</div>` : ''}`;
   },
 
   /* -------------------- 渠道插件 -------------------- */

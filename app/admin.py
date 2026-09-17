@@ -14,7 +14,7 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from . import balances, channels, crypto, protocols, relay, store
+from . import balances, channels, crypto, protocols, relay, store, utils
 
 router = APIRouter(prefix="/api")
 
@@ -274,7 +274,11 @@ def api_provider_delete(key: str, request: Request):
     with store.connect() as c:
         c.execute("DELETE FROM providers WHERE key=?", (key,))
         c.execute("DELETE FROM health WHERE provider=?", (key,))
-    return {"ok": True}
+        # 渠道没了，它的专属价格行就是孤儿价 —— 一起删掉，否则「模型单价」页会留下
+        # 一堆和已不存在渠道同名的重复行（banana/image2 合并后就是这样堆起来的）。
+        n = c.execute("SELECT COUNT(*) FROM model_prices WHERE provider=?", (key,)).fetchone()[0]
+        c.execute("DELETE FROM model_prices WHERE provider=?", (key,))
+    return {"ok": True, "prices_removed": n}
 
 
 @router.post("/providers/{key}/test")
@@ -962,6 +966,57 @@ def api_price_delete(pid: int, request: Request):
         return err
     store.execute("DELETE FROM model_prices WHERE id=?", (pid,))
     return {"ok": True}
+
+
+@router.post("/prices/prune")
+def api_prices_prune(request: Request):
+    """清理孤儿价：渠道已被删除/改名后遗留的价格行（provider 不是 * 且当前不存在）。"""
+    u, err = need_user(request)
+    if err:
+        return err
+    rows = store.rows("SELECT id, model, provider FROM model_prices WHERE provider IS NOT NULL AND provider<>'*'")
+    alive = {r["key"] for r in store.rows("SELECT key FROM providers")}
+    gone = [r for r in rows if r["provider"] not in alive]
+    for r in gone:
+        store.execute("DELETE FROM model_prices WHERE id=?", (r["id"],))
+    return {"removed": len(gone), "items": [{"id": r["id"], "model": r["model"], "provider": r["provider"]}
+                                            for r in gone]}
+
+
+@router.get("/size-plan")
+def api_size_plan(request: Request, model: str = "", size: str = "", policy: str = ""):
+    """尺寸换算（零成本、不出图）：这个模型 + 这个尺寸，最终会变成什么。"""
+    u, err = need_user(request)
+    if err:
+        return err
+    wh = utils.parse_size(size)
+    if not wh:
+        return {"model": model, "size": size, "error": "size 需要写成 1920x1080 这种形式"}
+    w, h = wh
+    fam = utils.fixed_sizes_for(model)
+    if fam:
+        dec = utils.snap_size(size, model)
+        return {"model": model, "size": size, "family": "fixed", "final": dec["size"],
+                "changed": dec["changed"], "note": dec["note"],
+                "allowed": [f"{a}x{b}" for a, b in fam]}
+    m = (model or "").lower()
+    is_gemini = "gemini" in m and "image" in m
+    if is_gemini:
+        pol = policy or "class"
+        plan = utils.gemini_plan(w, h, model, pol)
+        return {"model": model, "size": size, "family": "gemini", "policy": pol,
+                "ratio": plan["ratio"], "tier": plan["tier"],
+                "final": f"{plan['pixels'][0]}x{plan['pixels'][1]}",
+                "changed": f"{plan['pixels'][0]}x{plan['pixels'][1]}" != f"{w}x{h}",
+                "note": plan["note"],
+                "tiers": {t: [f"{a}x{b}" for a, b in utils.GEMINI_SIZES[utils.gemini_caps(model)[0]].get(plan["ratio"], {}).values()]
+                          for t in utils.gemini_caps(model)[1]}}
+    dec = utils.snap_size(size, model)
+    return {"model": model, "size": size, "family": "free", "final": dec["size"],
+            "changed": dec["changed"], "note": dec["note"] or f"{dec['size']}（已合规，原样透传）",
+            "rules": {"edge_multiple": 16, "edge_max": 3840, "ratio_max": "3:1",
+                      "area_min": 655_360, "area_max": 8_294_400,
+                      "source": "Azure OpenAI《GPT image models》"}}
 
 
 @router.post("/health/run")

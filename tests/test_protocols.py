@@ -131,7 +131,8 @@ def test_build_gemini_native_ok():
     url, up, meta = protocols.build_gemini_native(GEMINI_P, body)
     assert url == "https://api.example.com/v1beta/models/gemini-3-pro-image:generateContent"
     assert up["contents"][0]["parts"][0]["text"] == "一只橘猫宇航员"
-    assert up["generationConfig"]["imageConfig"] == {"aspectRatio": "16:9", "imageSize": "1K"}
+    assert up["generationConfig"]["imageConfig"] == {"aspectRatio": "16:9", "imageSize": "2K"}
+    assert "实际输出" in meta["size_note"] and meta["size_hdr"] == "1536x864->2752x1536 (16:9@2K)"
     assert meta["up_model"] == "gemini-3-pro-image" and meta["refs"] == 0
 
 
@@ -171,7 +172,7 @@ def test_build_openai_images_drops_and_normalizes():
     url, up, _ = protocols.build_openai_images(p, body)
     assert url == "https://api.example.com/images/generations"
     assert up["model"] == "gpt-image-2"
-    assert up["size"] == "1024x1024"          # 吸附到合规尺寸
+    assert up["size"] == "992x992"            # 最小改动吸附（旧版会跳到 1024x1024）
     assert up["quality"] == "high"            # hd → high
     assert "user" not in up and "response_format" not in up and "extra_body" not in up
     assert up["n"] == 2
@@ -238,7 +239,7 @@ def test_build_fal_queue_gemini_shape():
         FAL_P, {"model": "gemini-3-pro-image-preview", "prompt": "雪山", "size": "1536x864"})
     assert url == "https://fal.example.com/queue/fal-ai/gemini-3-pro-image-preview"
     assert up["prompt"] == "雪山"
-    assert up["aspect_ratio"] == "16:9" and up["resolution"] == "1K"
+    assert up["aspect_ratio"] == "16:9" and up["resolution"] == "2K"
     assert "num_images" not in up                       # 非 gpt 系不传
     assert meta["poll_base"] == "https://fal.example.com/queue/fal-ai/gemini-3-pro-image-preview"
 

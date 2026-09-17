@@ -278,6 +278,23 @@ def fetch_upstream_models(p: dict, key: str | None = None, path: str | None = No
 
 # ------------------------------------------------------------------ gemini native
 
+def gemini_policy(p: dict) -> str:
+    """Gemini 档位策略（渠道实例 options.gemini_size_policy 可覆盖）。
+
+    class（默认，按尺寸档位分类）/ floor（向下取档，最省）/ ceil（向上取档，不降级）/ nearest（取最接近档）。
+    """
+    v = str((p.get("options") or {}).get("gemini_size_policy") or "class").lower()
+    return v if v in ("class", "ceil", "floor", "nearest") else "class"
+
+
+def _size_meta(from_s: str, to_s: str, note: str, extra: str = "") -> dict:
+    """尺寸换算的对外呈现：中文说明给面板/日志，纯 ASCII 给响应头（HTTP 头不能放中文）。"""
+    if from_s == to_s and not extra:
+        return {}
+    hdr = f"{from_s}->{to_s}" + (f" ({extra})" if extra else "")
+    return {"size_from": from_s, "size_to": to_s, "size_note": note, "size_hdr": hdr}
+
+
 def build_gemini_native(p: dict, body: dict, edit: bool = False) -> tuple[str, dict, dict]:
     model = body.get("model") or ""
     up_model = upstream_model(p, model)
@@ -296,8 +313,10 @@ def build_gemini_native(p: dict, body: dict, edit: bool = False) -> tuple[str, d
         raise ValueError("prompt is required（缺 prompt 时本服务不会回落默认提示词）")
     gen_cfg: dict[str, Any] = {}
     wh = utils.parse_size(body.get("size"))
+    plan = None
     if wh:
-        gen_cfg["imageConfig"] = {"aspectRatio": utils.nearest_ratio(*wh), "imageSize": utils.resolution_of(*wh)}
+        plan = utils.gemini_plan(*wh, model=up_model, policy=gemini_policy(p))
+        gen_cfg["imageConfig"] = {"aspectRatio": plan["ratio"], "imageSize": plan["tier"]}
     if (p.get("options") or {}).get("image_size_override"):
         gen_cfg.setdefault("imageConfig", {})["imageSize"] = p["options"]["image_size_override"]
     if body.get("safety_tolerance"):
@@ -307,7 +326,11 @@ def build_gemini_native(p: dict, body: dict, edit: bool = False) -> tuple[str, d
         up["generationConfig"] = gen_cfg
     removed = apply_removals(up, (p.get("options") or {}).get("remove_params") or [])
     url = f"{p['base_url'].rstrip('/')}/v1beta/models/{up_model}:generateContent"
-    return url, up, {"up_model": up_model, "refs": refs, "removed": removed}
+    meta = {"up_model": up_model, "refs": refs, "removed": removed}
+    if plan:
+        meta.update(_size_meta(f"{wh[0]}x{wh[1]}", f"{plan['pixels'][0]}x{plan['pixels'][1]}",
+                               plan["note"], f"{plan['ratio']}@{plan['tier']}"))
+    return url, up, meta
 
 
 def parse_gemini_native(payload: Any) -> list[dict]:
@@ -335,8 +358,11 @@ def build_openai_images(p: dict, body: dict, edit: bool = False) -> tuple[str, d
     up = {k: v for k, v in body.items() if k not in drop and v is not None}
     up["model"] = up_model
     removed = apply_removals(up, [f for f in flat if "." in f or "*" in f] + nested)
+    size_meta: dict = {}
     if up.get("size"):
-        up["size"] = utils.gpt_safe_size(up["size"])
+        dec = utils.snap_size(up["size"], up_model)
+        up["size"] = dec["size"]
+        size_meta = _size_meta(dec["original"] or "", dec["size"], dec["note"])
     if "quality" in up:
         up["quality"] = utils.normalize_quality(up["quality"])
     if opts.get("drop_quality"):
@@ -348,7 +374,7 @@ def build_openai_images(p: dict, body: dict, edit: bool = False) -> tuple[str, d
         up[k] = v
     path = (opts.get("edits_path") if edit else opts.get("generations_path")) or \
            ("/v1/images/edits" if edit else "/v1/images/generations")
-    return p["base_url"].rstrip("/") + path, up, {"up_model": up_model, "removed": removed}
+    return p["base_url"].rstrip("/") + path, up, {"up_model": up_model, "removed": removed, **size_meta}
 
 
 # ------------------------------------------------------------------ fal queue
@@ -374,12 +400,18 @@ def build_fal_queue(p: dict, body: dict, edit: bool = False) -> tuple[str, dict,
         if not urls:
             raise ValueError("fal 异步面的参考图必须是公网 URL（fal 只拉 URL，不接受 base64/本地文件）")
         up["image_urls"] = urls
+    size_meta: dict = {}
     if wh:
         if is_gpt:
-            up["image_size"] = utils.gpt_safe_size(body.get("size"))
+            dec = utils.snap_size(body.get("size"), up_model)
+            up["image_size"] = dec["size"]
+            size_meta = _size_meta(dec["original"] or "", dec["size"], dec["note"])
         else:
-            up["aspect_ratio"] = utils.nearest_ratio(*wh)
-            up["resolution"] = utils.resolution_of(*wh)
+            plan = utils.gemini_plan(*wh, model=up_model, policy=gemini_policy(p))
+            up["aspect_ratio"] = plan["ratio"]
+            up["resolution"] = plan["tier"]
+            size_meta = _size_meta(f"{wh[0]}x{wh[1]}", f"{plan['pixels'][0]}x{plan['pixels'][1]}",
+                                   plan["note"], f"{plan['ratio']}@{plan['tier']}")
     if is_gpt:
         q = utils.normalize_quality(body.get("quality"))
         if q:
@@ -394,7 +426,7 @@ def build_fal_queue(p: dict, body: dict, edit: bool = False) -> tuple[str, dict,
             if body.get(f) not in (None, ""):
                 up[f] = str(body[f]) if f == "safety_tolerance" else body[f]
     base = p["base_url"].rstrip("/")
-    return base + submit_path, up, {"up_model": up_model, "poll_base": base + poll_base}
+    return base + submit_path, up, {"up_model": up_model, "poll_base": base + poll_base, **size_meta}
 
 
 def poll_fal(meta: dict, headers: dict, timeout: float = POLL_MAX) -> tuple[str, Any]:

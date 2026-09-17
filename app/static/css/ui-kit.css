@@ -840,3 +840,14 @@ body.dark .kit-code{background:#111a28;border-color:var(--line)}
 /* ---- 品牌标识：与控制台标题/favicon 同源（白色圆角底 + 吉祥物图标）---- */
 .brand .logo{background:#fff;border:1px solid rgba(255,255,255,.14);box-shadow:0 6px 16px -8px rgba(0,0,0,.6)}
 .brand .logo img{width:23px;height:23px;display:block}
+
+/* ---------- 模型目录：多张表共用列宽 + 数字右对齐（用户反馈「没有对齐」） ---------- */
+.tb-dir { table-layout: fixed; }
+.tb-dir th, .tb-dir td { vertical-align: middle; }
+.tb-dir th.num-col, .tb-dir td.num-col { text-align: right; font-variant-numeric: tabular-nums; }
+.tb-dir th.ctr, .tb-dir td.ctr { text-align: center; }
+.tb-dir td .mono { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.tb-dir td.src-col { white-space: nowrap; }
+.tb-dir td.src-col .src-note { display: inline-block; max-width: calc(100% - 74px); margin-left: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; color: var(--muted); font-weight: 400; }
+.tb-dir td .chip { margin: 1px 0; }
