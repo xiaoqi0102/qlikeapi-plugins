@@ -16,7 +16,7 @@
 控制台二次升级 + 探活安全修复 + 测试体系落地。
 
 ### Added
-- **测试体系**：`tests/` 198 个 pytest 用例（零网络、零成本），覆盖加密、协议翻译、
+- **测试体系**：`tests/` 199 个 pytest 用例（零网络、零成本），覆盖加密、协议翻译、
   渠道插件、数据层、HTTP 鉴权门、探活安全；新增 `pyproject.toml`（ruff / pytest / 覆盖率）。
 - **CI**：GitHub Actions 跑 lint + 测试 + 镜像构建；issue/PR 模板、dependabot。
 - **工程规范文件**：`README`、`CONTRIBUTING`、`SECURITY`、`CODE_OF_CONDUCT`、
