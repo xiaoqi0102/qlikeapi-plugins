@@ -3,7 +3,7 @@
 
 # 显式钉住生产依赖版本，让 Dependabot 能在这个清单里判定安全版本（-r 引入的也要写全）
 python-multipart==0.0.32
-pytest==8.3.4
+pytest==9.0.3
 pytest-asyncio==0.25.0
 ruff==0.8.4
 pytest-cov==6.0.0
