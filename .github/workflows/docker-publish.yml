@@ -90,6 +90,22 @@ jobs:
           grep -q '"ok":true' /tmp/h.json
           docker logs smoke | tail -10
 
+      # 镜像本身不含任何私密内容（.dockerignore 排掉了 data/、.env、docs/），
+      # 所以顺手把包设成公开，别人不用登录就能拉。
+      # GITHUB_TOKEN 对自己仓库推的包有管理权限，不需要用户的 PAT
+      # （本地 gh token 只有 repo/workflow，改不了可见性）。
+      - name: 把包设为公开
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api -X PATCH "/user/packages/container/${GITHUB_REPOSITORY#*/}" \
+               -f visibility=public > /tmp/vis.json 2>/tmp/vis.err; then
+            echo "已设为公开：$(head -c 200 /tmp/vis.json)"
+          else
+            echo "::warning::设置公开失败（不影响镜像，可到包设置页手动改）：$(cat /tmp/vis.err)"
+          fi
+
       - name: 汇总
         run: |
           {
