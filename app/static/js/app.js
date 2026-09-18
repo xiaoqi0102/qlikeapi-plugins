@@ -1030,19 +1030,22 @@ const act = {
     act.mapRender();
     toast('已加入 ' + v);
   },
-  async mapSyncUpstream(btn) {
+  async mapSyncUpstream(btn, all) {
     const key = ($('#fKey').value || '').trim();
     if (!key) return toast('先填实例名并保存渠道，才能同步上游模型', true);
     if (btn) btn.disabled = true;
     try {
-      const r = await api('/api/providers/' + encodeURIComponent(key) + '/fetch-models', { method: 'POST' });
+      const r = await api('/api/providers/' + encodeURIComponent(key) + '/fetch-models'
+                          + (all ? '?all=1' : ''), { method: 'POST' });
       if (!r) return;
       if (!r.ok) return toast(r.data.error || '同步失败', true);
       const list = (r.data && r.data.models) || [];
       const n = act.mapAddUpstream(list);
       act.renderUpList(r.data, n);
-      toast(n ? ('已从上游同步 ' + n + ' 个新模型（上游共 ' + list.length + ' 个' + (act.groupHint(r.data) || '') + '）')
-              : ('上游 ' + list.length + ' 个模型均已在白名单/映射里'));
+      const nd = ((r.data && r.data.dropped) || []).length;
+      toast(n ? ('已从上游同步 ' + n + ' 个新图片模型（上游共 ' + list.length + ' 个' + (act.groupHint(r.data) || '')
+                 + (nd ? '，另过滤掉 ' + nd + ' 个非图片' : '') + '）')
+              : ('上游 ' + list.length + ' 个图片模型均已在白名单/映射里' + (nd ? '（另过滤掉 ' + nd + ' 个非图片）' : '')));
     } finally { if (btn) btn.disabled = false; }
   },
   mapAddUpstream(list) {
@@ -1070,11 +1073,17 @@ const act = {
   renderUpList(d, added) {
     const host = $('#upModels');
     if (!host) return;
-    host.innerHTML = `<div class="hint">上游 <span class="mono">${esc(d.url || '')}</span> 去重后 <b>${d.count || 0}</b> 个模型${act.groupHint(d)}；
+    const dropped = (d && d.dropped) || [];
+    const dropNote = dropped.length ? `<div class="hint">已过滤 <b>${dropped.length}</b> 个非图片模型（视频/对话等）：
+      <span class="mono">${dropped.slice(0, 8).map(esc).join(', ')}${dropped.length > 8 ? ' …' : ''}</span>
+      <button class="btn btn-sm btn-link" onclick="act.mapSyncAll()">显示全部（含非图片）</button></div>` : '';
+    host.innerHTML = `<div class="hint">上游 <span class="mono">${esc(d.url || '')}</span> 去重后 <b>${d.count || 0}</b> 个${d.image_only === false ? '模型' : '图片模型'}${act.groupHint(d)}；
       本次新增 <b>${added || 0}</b> 个（带 <span class="mono">/</span> 的按「裸名 → 带前缀真实名」建映射，其余进白名单）
       <button class="btn btn-sm btn-link" onclick="act.upModelsHide()">收起</button></div>
-      <div class="row" style="gap:4px">${((d.models || []).slice(0, 60)).map(m => `<span class="chip mono">${esc(m)}</span>`).join(' ')}</div>`;
+      <div class="row" style="gap:4px">${((d.models || []).slice(0, 60)).map(m => `<span class="chip mono">${esc(m)}</span>`).join(' ')}</div>
+      ${dropNote}`;
   },
+  mapSyncAll() { return act.mapSyncUpstream(null, true); },
   mapClear() {
     UI.confirm('清除这个渠道的模型白名单与映射？（点保存后生效）', {okText: '清除'}).then(ok => {
       if (!ok) return;

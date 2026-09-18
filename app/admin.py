@@ -556,7 +556,9 @@ def api_provider_fetch_models(key: str, request: Request):
     if not keys:
         return JSONResponse({"error": "这个渠道还没配 API key，先填 key 并保存"}, status_code=400)
     group = (request.query_params.get("group") or "").strip()
-    res = protocols.fetch_upstream_models_multi(p, store.key_entries(p), group=group)
+    image_only = (request.query_params.get("all") or "") != "1"     # 默认只回图片模型；?all=1 看全部
+    res = protocols.fetch_upstream_models_multi(p, store.key_entries(p), group=group,
+                                                image_only=image_only)
     if not res.get("ok"):
         return JSONResponse({"error": res.get("error") or "拉取失败"}, status_code=400)
     res["existing"] = list((p.get("model_map") or {}).keys())

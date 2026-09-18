@@ -289,13 +289,41 @@ def model_ids_from(payload: Any) -> list[str]:
     return out
 
 
+# 上游 /v1/models 往往把「这个平台的全部模型」都列出来（aicost 会把 12 个 seedance 视频模型混进来，
+# 七牛/qnaigc 甚至一个图片模型都不列、全是对话模型）。本网关是图片面，同步时默认只留图片模型：
+#   先排除明确是视频的名字，再要求命中图片家族关键字（不靠"上游没列"这种假设，也不动插件预置）。
+VIDEO_MODEL_HINTS = ("video", "i2v", "t2v", "seedance", "veo", "sora", "kling", "runway", "pika",
+                     "luma", "hailuo", "cogvideo", "mochi", "-vid", "vid-")
+IMAGE_MODEL_HINTS = ("image", "banana", "flux", "dall-e", "dalle", "imagen", "seedream", "z-image",
+                     "kolors", "ideogram", "recraft", "stable-diffusion", "sdxl", "sd3", "midjourney",
+                     "wanx", "t2i", "txt2img", "imagegen")
+
+
+def is_image_model(name: str) -> bool:
+    """按模型名判断是不是图片模型（视频优先排除，避免 image-to-video 这类名字被误收）。"""
+    low = str(name or "").lower()
+    if any(h in low for h in VIDEO_MODEL_HINTS):
+        return False
+    return any(h in low for h in IMAGE_MODEL_HINTS)
+
+
+def split_image_models(models: list[str]) -> tuple[list[str], list[str]]:
+    """拆成 (图片模型, 非图片模型)，都保持排序稳定。"""
+    kept = [m for m in models if is_image_model(m)]
+    dropped = [m for m in models if not is_image_model(m)]
+    return kept, dropped
+
+
 def fetch_upstream_models_multi(p: dict, entries: list[dict] | None = None, group: str = "",
-                                timeout: float = 15.0) -> dict:
+                                timeout: float = 15.0, image_only: bool = True) -> dict:
     """逐把 key 拉上游模型列表并取**并集** —— sub2api 系上游的 key 绑分组，单把 key 只能看到
     自己那一组的模型（实测 change2pro：gemini 组 4 个、gpt 组 3 个，只拉第一把会丢一半）。
 
-    `group` 非空时只拉该标签的 key；返回在 `fetch_upstream_models` 基础上多两个字段：
-    `groups`（每个标签 → 它那组看到的模型，前端据此显示来源）、`errors`（哪把 key 没拉到）。
+    `group` 非空时只拉该标签的 key；`image_only=True`（默认）时只保留图片模型，
+    非图片的（视频/对话等）进 `dropped` 由前端提示、可一键「显示全部」。
+    返回在 `fetch_upstream_models` 基础上多几个字段：
+    `groups`（每个标签 → 它那组看到的模型，前端据此显示来源）、`errors`（哪把 key 没拉到）、
+    `dropped`（被过滤掉的非图片模型）。
     """
     entries = entries if entries is not None else store.key_entries(p)
     picked = [e for e in entries if not group or e.get("label") == group]
@@ -317,8 +345,12 @@ def fetch_upstream_models_multi(p: dict, entries: list[dict] | None = None, grou
             errors[label] = str(res.get("error") or "拉取失败")
     if not groups:
         return {"ok": False, "error": "所有密钥都没拉到模型列表：" + json.dumps(errors, ensure_ascii=False)[:300]}
-    return {"ok": True, "url": " / ".join(urls), "models": sorted(union), "count": len(union),
-            "groups": groups, "errors": errors}
+    models = sorted(union)
+    dropped: list[str] = []
+    if image_only:                                  # 默认只留图片模型（本网关是图片面）
+        models, dropped = split_image_models(models)
+    return {"ok": True, "url": " / ".join(urls), "models": models, "count": len(models),
+            "groups": groups, "errors": errors, "dropped": dropped, "image_only": image_only}
 
 
 def fetch_upstream_models(p: dict, key: str | None = None, path: str | None = None,

@@ -191,15 +191,15 @@ def test_fetch_upstream_models_multi_unions_key_groups(monkeypatch):
 
 def test_fetch_upstream_models_multi_group_filter_and_partial_failure(monkeypatch):
     """带 group 参数只拉那一把；某把失败时其余照收，失败原因进 errors。"""
-    fake = _FakeHTTPByKey({"sk-gemini": ["m-gemini"], "sk-bad": None})
+    fake = _FakeHTTPByKey({"sk-gemini": ["gemini-3-pro-image"], "sk-bad": None})
     monkeypatch.setattr(protocols, "HTTP", fake)
     entries = [{"label": "gemini", "key": "sk-gemini"}, {"label": "gpt", "key": "sk-bad"}]
 
     only = protocols.fetch_upstream_models_multi(_two_key_provider(), entries, group="gemini")
-    assert only["ok"] is True and only["models"] == ["m-gemini"] and len(fake.seen) == 1
+    assert only["ok"] is True and only["models"] == ["gemini-3-pro-image"] and len(fake.seen) == 1
 
     both = protocols.fetch_upstream_models_multi(_two_key_provider(), entries)
-    assert both["ok"] is True and both["models"] == ["m-gemini"]
+    assert both["ok"] is True and both["models"] == ["gemini-3-pro-image"]
     assert "拉取失败" in both["errors"]["gpt"]
 
     none = protocols.fetch_upstream_models_multi(_two_key_provider(), [], group="")
@@ -218,3 +218,47 @@ def test_fetch_models_endpoint_unions_all_key_groups(login, make_provider, monke
 
     one = login.post("/api/providers/c2p/fetch-models?group=gpt").json()
     assert one["models"] == ["gpt-image-2"] and len(fake.seen) == 3
+
+
+# ------------------------------------------------------------------ 只留图片模型（过滤视频/对话）
+
+def test_is_image_model_real_world_names():
+    """用三个渠道的真实模型名当样例（aicost 混了 12 个 seedance 视频、qnaigc 全是对话模型）。"""
+    keep = ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
+            "gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview",
+            "gemini-3.1-flash-image", "fal-ai/gemini-3-pro-image-preview",
+            "openai/gpt-image-2", "nano-banana", "fal-ai/flux/dev", "doubao-seedream-4.0"]
+    drop = ["seedance2.0-480p", "seedance2.0-hs-1080p", "seedance2.5-900", "seedance2.5-vid",
+            "sd-2.0-933-720-满血原生真人", "kling-v2", "veo-3", "sora-2",
+            "deepseek-r1", "qwen3-235b-a22b", "z-ai/glm-4.6", "moonshotai/kimi-k2.6",
+            "wan2.2-i2v", "image-to-video-x"]          # ← 名字里带 image 但是视频，必须排除
+    assert all(protocols.is_image_model(m) for m in keep), [m for m in keep if not protocols.is_image_model(m)]
+    assert not any(protocols.is_image_model(m) for m in drop), [m for m in drop if protocols.is_image_model(m)]
+
+
+def test_fetch_upstream_models_multi_filters_non_image(monkeypatch):
+    """aicost 实况：17 个里 12 个是 seedance 视频 → 默认只回 5 个图片模型，其余进 dropped。"""
+    fake = _FakeHTTPByKey({"sk-a": ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
+                                    "gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview",
+                                    "seedance2.0-480p", "seedance2.5-vid", "seedance2.0-std"]})
+    monkeypatch.setattr(protocols, "HTTP", fake)
+    entries = [{"label": "", "key": "sk-a"}]
+    res = protocols.fetch_upstream_models_multi(_provider(), entries)
+    assert res["ok"] is True and res["count"] == 5 and res["image_only"] is True
+    assert "seedance2.0-480p" not in res["models"] and "seedance2.5-vid" in res["dropped"]
+    assert len(res["dropped"]) == 3
+
+    everything = protocols.fetch_upstream_models_multi(_provider(), entries, image_only=False)
+    assert everything["count"] == 8 and everything["dropped"] == [] and everything["image_only"] is False
+
+
+def test_fetch_models_endpoint_image_only_by_default(login, make_provider, monkeypatch):
+    make_provider(key="ac", api_key="sk-a")
+    fake = _FakeHTTPByKey({"sk-a": ["gpt-image-2", "seedance2.0-720p"]})
+    monkeypatch.setattr(protocols, "HTTP", fake)
+    d = login.post("/api/providers/ac/fetch-models").json()
+    assert d["models"] == ["gpt-image-2"] and d["dropped"] == ["seedance2.0-720p"]
+    assert d["image_only"] is True
+
+    everything = login.post("/api/providers/ac/fetch-models?all=1").json()
+    assert everything["models"] == ["gpt-image-2", "seedance2.0-720p"] and everything["dropped"] == []

@@ -11,6 +11,23 @@
   一眼看出并集齐不齐。实测 change2pro 4 → 7；aicost(17) / qnaigc(81) 无回归。
 - 测试：新增 3 项（并集 / 单组过滤 + 部分失败 / 接口层并集）。
 
+### 新增：渠道弹窗去掉「插件预置」，模型候选只认上游
+- 用户口径：「插件内置不需要，只要上游实际获取的模型列表」。删掉 `#mapPills` 预置药丸、
+  「快捷添加（本插件的预置模型…）」标签、「同步最新支持模型」按钮与
+  `act.mapSyncPreset()/mapAddPreset()/mapFamily()`；候选来源只剩 **上游同步过的（标「已同步」）
+  ∪ 当前已选**（已选值必须保留，否则 chips 渲染不出来）。
+
+### 新增：同步上游模型时只保留图片模型（过滤视频/对话）
+- aicost 实测 `/v1/models` 回 17 个，其中 12 个是 seedance 视频；qnaigc 更极端 —— 81 个**全是对话模型**，
+  一个图片模型都没有（它的图片模型不在这个接口里）。
+- `protocols.is_image_model()/split_image_models()`：**先排除视频关键字**（`seedance`/`veo`/`kling`/`i2v`/
+  `image-to-video` …，避免名字里带 image 的视频被误收），再要求命中图片家族关键字
+  （`image`/`banana`/`flux`/`dall-e`/`seedream`/`z-image`/`sd3` …）。
+- `fetch_upstream_models_multi(..., image_only=True)` 默认过滤，被滤掉的进 `dropped`；
+  面板显示「已过滤 N 个非图片模型（视频/对话等）」+ 一个「显示全部（含非图片）」按钮
+  （走 `POST /api/providers/{key}/fetch-models?all=1`）。
+- 实测：aicost 默认 5 个图片模型 ✓ / `?all=1` 17 个 ✓；change2pro 仍 7 个 ✓。
+
 ## v3.15.2 — 2026-09-18
 
 ### 修正：CI 变红（文档防漂移校验失败）
