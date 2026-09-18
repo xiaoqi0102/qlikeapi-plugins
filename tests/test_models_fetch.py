@@ -145,3 +145,76 @@ def test_sysinfo_exposes_gate_and_router(login):
     assert d["gate"]["global_limit"] >= 0
     assert d["router"]["max_attempts"] >= 1
     assert 429 in d["router"]["retryable"]
+
+
+# ------------------------------------------------------------------ 多把 key 取并集（分组密钥）
+
+class _FakeHTTPByKey:
+    """按 Authorization 里的 key 返回不同模型列表 —— 模拟 sub2api 系「密钥绑分组」。
+
+    实测：change2pro 的 gemini 组 key 只看到 4 个 gemini 模型、gpt 组 key 只看到 3 个 gpt 模型。
+    """
+
+    def __init__(self, by_key):
+        self.by_key = by_key
+        self.seen = []
+
+    def get(self, url, headers=None, timeout=None):
+        self.seen.append({"method": "GET", "url": url, "headers": headers})
+        key = str((headers or {}).get("Authorization") or "").replace("Bearer ", "")
+        models = self.by_key.get(key)
+        if models is None:
+            return _Resp(404, None, "not found")
+        return _Resp(200, {"data": [{"id": m} for m in models]})
+
+
+def _two_key_provider():
+    return _provider(base_url="https://api.change2pro.com")
+
+
+def test_fetch_upstream_models_multi_unions_key_groups(monkeypatch):
+    """必须逐把 key 拉并取并集：只拉第一把会丢掉其它分组的模型（用户实测的 bug）。"""
+    fake = _FakeHTTPByKey({"sk-gemini": ["gemini-3-pro-image", "gemini-3.1-flash-image"],
+                           "sk-gpt": ["gpt-image-2", "gpt-image-2.5-flare"]})
+    monkeypatch.setattr(protocols, "HTTP", fake)
+    entries = [{"label": "gemini", "key": "sk-gemini"}, {"label": "gpt", "key": "sk-gpt"}]
+    res = protocols.fetch_upstream_models_multi(_two_key_provider(), entries)
+    assert res["ok"] is True
+    assert res["models"] == ["gemini-3-pro-image", "gemini-3.1-flash-image",
+                             "gpt-image-2", "gpt-image-2.5-flare"]          # 并集 + 排序
+    assert res["count"] == 4
+    assert res["groups"]["gemini"] == ["gemini-3-pro-image", "gemini-3.1-flash-image"]
+    assert res["groups"]["gpt"] == ["gpt-image-2", "gpt-image-2.5-flare"]
+    assert res["errors"] == {}
+    assert len(fake.seen) == 2 and all(s["method"] == "GET" for s in fake.seen)   # 零成本
+
+
+def test_fetch_upstream_models_multi_group_filter_and_partial_failure(monkeypatch):
+    """带 group 参数只拉那一把；某把失败时其余照收，失败原因进 errors。"""
+    fake = _FakeHTTPByKey({"sk-gemini": ["m-gemini"], "sk-bad": None})
+    monkeypatch.setattr(protocols, "HTTP", fake)
+    entries = [{"label": "gemini", "key": "sk-gemini"}, {"label": "gpt", "key": "sk-bad"}]
+
+    only = protocols.fetch_upstream_models_multi(_two_key_provider(), entries, group="gemini")
+    assert only["ok"] is True and only["models"] == ["m-gemini"] and len(fake.seen) == 1
+
+    both = protocols.fetch_upstream_models_multi(_two_key_provider(), entries)
+    assert both["ok"] is True and both["models"] == ["m-gemini"]
+    assert "拉取失败" in both["errors"]["gpt"]
+
+    none = protocols.fetch_upstream_models_multi(_two_key_provider(), [], group="")
+    assert none["ok"] is False and "还没配 API key" in none["error"]
+
+
+def test_fetch_models_endpoint_unions_all_key_groups(login, make_provider, monkeypatch):
+    make_provider(key="c2p", api_key="gemini::sk-gemini\ngpt::sk-gpt",
+                  base_url="https://api.change2pro.com")
+    fake = _FakeHTTPByKey({"sk-gemini": ["gemini-3-pro-image"], "sk-gpt": ["gpt-image-2"]})
+    monkeypatch.setattr(protocols, "HTTP", fake)
+    d = login.post("/api/providers/c2p/fetch-models").json()
+    assert d["ok"] is True
+    assert d["models"] == ["gemini-3-pro-image", "gpt-image-2"]      # 两把 key 的并集
+    assert sorted(d["groups"]) == ["gemini", "gpt"]
+
+    one = login.post("/api/providers/c2p/fetch-models?group=gpt").json()
+    assert one["models"] == ["gpt-image-2"] and len(fake.seen) == 3

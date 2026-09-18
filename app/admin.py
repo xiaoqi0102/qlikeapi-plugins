@@ -556,8 +556,7 @@ def api_provider_fetch_models(key: str, request: Request):
     if not keys:
         return JSONResponse({"error": "这个渠道还没配 API key，先填 key 并保存"}, status_code=400)
     group = (request.query_params.get("group") or "").strip()
-    picked = [e for e in store.key_entries(p) if group and e.get("label") == group] or store.key_entries(p)
-    res = protocols.fetch_upstream_models(p, key=picked[0]["key"] if picked else keys[0])
+    res = protocols.fetch_upstream_models_multi(p, store.key_entries(p), group=group)
     if not res.get("ok"):
         return JSONResponse({"error": res.get("error") or "拉取失败"}, status_code=400)
     res["existing"] = list((p.get("model_map") or {}).keys())

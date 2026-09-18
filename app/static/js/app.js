@@ -1077,7 +1077,7 @@ const act = {
       const list = (r.data && r.data.models) || [];
       const n = act.mapAddUpstream(list);
       act.renderUpList(r.data, n);
-      toast(n ? ('已从上游同步 ' + n + ' 个新模型（上游共 ' + list.length + ' 个）')
+      toast(n ? ('已从上游同步 ' + n + ' 个新模型（上游共 ' + list.length + ' 个' + (act.groupHint(r.data) || '') + '）')
               : ('上游 ' + list.length + ' 个模型均已在白名单/映射里'));
     } finally { if (btn) btn.disabled = false; }
   },
@@ -1097,10 +1097,16 @@ const act = {
     act.mapRender();
     return n;
   },
+  groupHint(d) {
+    const g = (d && d.groups) || {};
+    const ks = Object.keys(g);
+    if (ks.length < 2) return '';
+    return '（' + ks.map(k => esc(k) + ' <b>' + ((g[k] || []).length) + '</b> 个').join(' + ') + '）';
+  },
   renderUpList(d, added) {
     const host = $('#upModels');
     if (!host) return;
-    host.innerHTML = `<div class="hint">上游 <span class="mono">${esc(d.url || '')}</span> 去重后 <b>${d.count || 0}</b> 个模型；
+    host.innerHTML = `<div class="hint">上游 <span class="mono">${esc(d.url || '')}</span> 去重后 <b>${d.count || 0}</b> 个模型${act.groupHint(d)}；
       本次新增 <b>${added || 0}</b> 个（带 <span class="mono">/</span> 的按「裸名 → 带前缀真实名」建映射，其余进白名单）
       <button class="btn btn-sm btn-link" onclick="act.upModelsHide()">收起</button></div>
       <div class="row" style="gap:4px">${((d.models || []).slice(0, 60)).map(m => `<span class="chip mono">${esc(m)}</span>`).join(' ')}</div>`;

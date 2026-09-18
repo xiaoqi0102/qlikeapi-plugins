@@ -1,3 +1,16 @@
+## v3.15.3 — 2026-09-18
+
+### 修正：「同步上游支持的模型」只拉到第一把密钥的分组（用户实测）
+- sub2api 系上游的密钥**绑分组**（change2pro 实测：`gemini::` 那把只看到 4 个 gemini 模型、
+  `gpt::` 那把只看到 3 个 gpt 模型），旧实现只拿第一把 key 去拉 → 永远丢一半，
+  面板底部却提示「共 4 个模型」看着像成功，实际 `gpt-image-2`/`-flare`/`-sunburst` 全没进来。
+- 新增 `protocols.fetch_upstream_models_multi()`：**逐把密钥各拉一次、取并集**，返回
+  `groups`（每个分组标签 → 它那组看到的模型）与 `errors`（哪把没拉到，其余照收）；
+  `POST /api/providers/{key}/fetch-models?group=<标签>` 仍可只看单组。
+- 面板：模型清单与 toast 显示分组来源（`去重后 7 个模型（gemini 4 个 + gpt 3 个）`），
+  一眼看出并集齐不齐。实测 change2pro 4 → 7；aicost(17) / qnaigc(81) 无回归。
+- 测试：新增 3 项（并集 / 单组过滤 + 部分失败 / 接口层并集）。
+
 ## v3.15.2 — 2026-09-18
 
 ### 修正：CI 变红（文档防漂移校验失败）

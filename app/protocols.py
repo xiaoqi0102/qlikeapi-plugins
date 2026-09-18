@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 import urllib.parse
@@ -286,6 +287,38 @@ def model_ids_from(payload: Any) -> list[str]:
         if mid and mid not in out:                 # 去重：同一平台重复命名只留一条
             out.append(mid)
     return out
+
+
+def fetch_upstream_models_multi(p: dict, entries: list[dict] | None = None, group: str = "",
+                                timeout: float = 15.0) -> dict:
+    """逐把 key 拉上游模型列表并取**并集** —— sub2api 系上游的 key 绑分组，单把 key 只能看到
+    自己那一组的模型（实测 change2pro：gemini 组 4 个、gpt 组 3 个，只拉第一把会丢一半）。
+
+    `group` 非空时只拉该标签的 key；返回在 `fetch_upstream_models` 基础上多两个字段：
+    `groups`（每个标签 → 它那组看到的模型，前端据此显示来源）、`errors`（哪把 key 没拉到）。
+    """
+    entries = entries if entries is not None else store.key_entries(p)
+    picked = [e for e in entries if not group or e.get("label") == group]
+    if not picked:
+        return {"ok": False, "error": (f"没有标签为 {group} 的密钥" if group else "这个渠道还没配 API key")}
+    groups: dict[str, list[str]] = {}
+    errors: dict[str, str] = {}
+    urls: list[str] = []
+    union: set[str] = set()
+    for e in picked:
+        label = str(e.get("label") or "(未命名)")
+        res = fetch_upstream_models(p, key=e.get("key"), timeout=timeout)
+        if res.get("ok"):
+            groups[label] = res["models"]
+            union |= set(res["models"])
+            if res.get("url") and res["url"] not in urls:
+                urls.append(res["url"])
+        else:
+            errors[label] = str(res.get("error") or "拉取失败")
+    if not groups:
+        return {"ok": False, "error": "所有密钥都没拉到模型列表：" + json.dumps(errors, ensure_ascii=False)[:300]}
+    return {"ok": True, "url": " / ".join(urls), "models": sorted(union), "count": len(union),
+            "groups": groups, "errors": errors}
 
 
 def fetch_upstream_models(p: dict, key: str | None = None, path: str | None = None,
