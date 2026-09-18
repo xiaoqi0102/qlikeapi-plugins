@@ -369,6 +369,7 @@ const act = {
     document.body.classList.toggle('dark', !!dark);
     try { localStorage.setItem('ql_theme', dark ? 'dark' : 'light'); } catch (e) {}
     const b = $('#themeBtn'); if (b) b.innerHTML = `<i class="ti ti-${dark ? 'sun' : 'moon'}"></i>`;
+    if (_cm) _cm.setOption('theme', cmTheme());     // 插件编辑器开着时也跟着换主题
     const v = (location.hash.slice(1) || 'overview');
     if (v === 'overview' && act.loadOverview) act.loadOverview(1);
     else if (v === 'usage' && act.loadUsage) act.loadUsage();
