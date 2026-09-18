@@ -16,7 +16,10 @@ from .base import Channel
 class Change2Pro(Channel):
     id = "change2pro"
     label = "Change2Pro（香蕉 + image2 合一）"
+    vendor = "Change2Pro（api.change2pro.com）"
+    docs = "https://api.change2pro.com"
     hint = "同一站点按模型自动分流：gemini 系走 generateContent，gpt-image 系走 /images/generations"
+    protocol_note = "站点自有口径：两套协议都吃 Bearer；gemini 面参考图走 inlineData，image2 面注意路径无 /v1。"
     default_auth = "bearer"
     default_base_url = "https://api.change2pro.com"
     operations = {"generate": "converted", "edit": "converted"}

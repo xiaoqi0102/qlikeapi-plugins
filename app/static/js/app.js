@@ -760,6 +760,27 @@ const act = {
 
   pvRoutesToggle() { state.pvRoutes = !state.pvRoutes; act.renderRouteSummary(); },
 
+  // 插件口径说明：谁家的协议就用谁家的名字 / 文档，避免把「形似协议」混为一谈
+  protoInfoHtml(id) {
+    const c = (state.plugins || []).find(x => x.id === (id || $('#fProto')?.value));
+    if (!c) return '<span class="hint">选一个插件看它的协议口径</span>';
+    const ops = (c.operations || []).map(o => `<span class="chip mono">${esc(o.operation)}: ${esc(o.mode)}</span>`).join(' ');
+    return `<div class="d-flex align-items-center" style="gap:6px;flex-wrap:wrap">
+        <b>${esc(c.label)}</b> <span class="chip mono">${esc(c.id)}</span>${c.vendor ? `<span class="pill">${esc(c.vendor)}</span>` : ''}
+        ${c.docs ? `<a class="btn btn-sm btn-outline-secondary" href="${esc(c.docs)}" target="_blank" rel="noopener"><i class="ti ti-external-link"></i> 官方文档</a>` : ''}
+        <span class="hint">${ops}</span></div>
+      <div class="hint mt-1">${esc(c.hint || '')}</div>
+      ${c.note ? `<div class="hint">⚠ ${esc(c.note)}</div>` : ''}`;
+  },
+
+  protoInfo() {
+    const el = $('#fProtoInfo');
+    if (el) el.innerHTML = act.protoInfoHtml();
+    const c = (state.plugins || []).find(x => x.id === $('#fProto')?.value);
+    const b = $('#fBase');
+    if (c && b && !b.value && c.default_base_url) b.value = c.default_base_url;
+  },
+
   async providerForm(key) {
     const p = key ? state.providers.find(x => x.key === key) : null;
     if (!state.sites.length && p !== undefined) { const rs = await api('/api/sites'); if (rs && Array.isArray(rs.data)) state.sites = rs.data; }
@@ -772,9 +793,10 @@ const act = {
           <input class="form-control" id="fKey" value="${esc(p?.key || '')}" ${p ? 'disabled' : ''} placeholder="qnaigc-sync"></div>
         <div class="col-md-6"><label class="form-label">显示名</label>
           <input class="form-control" id="fLabel" value="${esc(p?.label || '')}" placeholder="七牛 ModelInk 同步面"></div>
-        <div class="col-md-6"><label class="form-label">渠道插件（协议类型）</label><select class="form-select" id="fProto">${opts}</select></div>
+        <div class="col-md-6"><label class="form-label">渠道插件（协议类型）</label><select class="form-select" id="fProto" onchange="act.protoInfo()">${opts}</select></div>
         <div class="col-md-6"><label class="form-label">鉴权方式</label><select class="form-select" id="fAuth">
           ${['bearer','x-goog-api-key','fal_key'].map(a => `<option ${p?.auth_mode === a ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+        <div class="col-12"><div id="fProtoInfo" class="note">${act.protoInfoHtml(p?.protocol || (state.plugins[0] || {}).id)}</div></div>
         <div class="col-12"><label class="form-label">上游 base_url</label>
           <input class="form-control" id="fBase" value="${esc(p?.base_url || '')}" placeholder="https://api.qnaigc.com"></div>
         <div class="col-12">
@@ -1265,26 +1287,53 @@ const act = {
               m.operations.map(o => `<span class="chip">${o}</span>`).join(' ')]
           }), act.DIRCOLS)}</div>
       </div>`).join('')
-      + `<div class="panel" style="box-shadow:none"><div class="body">
-           <div class="row align-items-end" style="gap:8px">
-             <div><label class="form-label">尺寸换算（零成本，不出图）</label>
-               <input class="form-control form-control-sm" id="spModel" placeholder="模型名，如 gemini-3.1-flash-image" style="width:280px"></div>
-             <div><label class="form-label">客户端请求尺寸</label>
-               <input class="form-control form-control-sm" id="spSize" value="1920x1080" style="width:140px"></div>
-             <div><label class="form-label">Gemini 档位策略</label>
-               <select class="form-select form-select-sm" id="spPolicy" style="width:190px">
-                 <option value="class">按档位分类（默认）</option><option value="floor">向下取档（最省）</option>
-                 <option value="nearest">取最接近档</option><option value="ceil">向上取档（不降级）</option></select></div>
-             <div><label class="form-label">尺寸处理</label>
-               <select class="form-select form-select-sm" id="spMode" style="width:190px">
-                 <option value="snap">按官方约束吸附</option><option value="passthrough">原样透传（不改）</option></select></div>
-             <button class="btn btn-sm btn-primary" onclick="act.sizePlan()"><i class="ti ti-ruler-measure"></i> 换算</button>
-             <button class="btn btn-sm btn-outline-secondary" onclick="act.syncPrices(this)"><i class="ti ti-cloud-download"></i> 从上游同步真实价格</button>
+      + `<div class="panel" style="box-shadow:none">
+           <header>
+             <h3><i class="ti ti-ruler-measure"></i> 尺寸换算
+               <span class="hint">填模型名 + 尺寸，看本服务最终发给上游什么</span></h3>
+             <div class="acts">
+               <span class="pill ok">零成本</span><span class="pill">不出图</span>
+               <button class="btn btn-sm btn-outline-secondary" onclick="act.syncPrices(this)"
+                       title="按 New API 的 ModelPrice 校准真实单价（与价格表同源）">
+                 <i class="ti ti-cloud-download"></i> 同步价格</button>
+             </div>
+           </header>
+           <div class="body">
+             <div class="grid2">
+               <div>
+                 <label class="form-label">模型名</label>
+                 <input class="form-control form-control-sm" id="spModel" list="spModels"
+                        placeholder="如 gemini-3.1-flash-image">
+                 <datalist id="spModels">${[...new Set(r.data.map(m => m.model))].map(x => `<option value="${esc(x)}"></option>`).join('')}</datalist>
+                 <div class="hint mt-1">直接从上面表格里的模型名挑；GPT 系走「最小改动吸附」，Gemini 系只能给「档位 + 比例」</div>
+               </div>
+               <div>
+                 <label class="form-label">客户端请求尺寸</label>
+                 <div class="acts">
+                   <input class="form-control form-control-sm mono" id="spSize" value="1920x1080">
+                   <button class="btn btn-sm btn-primary" onclick="act.sizePlan()"><i class="ti ti-ruler-measure"></i> 换算</button>
+                 </div>
+                 <div class="hint mt-1">宽x高（如 1920x1080），也认 16:9 这种比例写法</div>
+               </div>
+               <div>
+                 <label class="form-label">Gemini 档位策略</label>
+                 <select class="form-select form-select-sm" id="spPolicy">
+                   <option value="class">按档位分类（默认）</option><option value="floor">向下取档（最省）</option>
+                   <option value="nearest">取最接近档</option><option value="ceil">向上取档（不降级）</option></select>
+                 <div class="hint mt-1">只对 Gemini 系生效，OpenAI 系不看它</div>
+               </div>
+               <div>
+                 <label class="form-label">尺寸处理</label>
+                 <select class="form-select form-select-sm" id="spMode">
+                   <option value="snap">按官方约束吸附</option><option value="passthrough">原样透传（不改）</option></select>
+                 <div class="hint mt-1">「原样透传」= 一个像素都不动，直接交给上游</div>
+               </div>
+             </div>
+             <div class="mt-2"><span class="hint">OpenAI 官方常用尺寸（点一下填进去）：</span>
+               ${act.OFFICIAL_SIZES.map(([sz, lb]) => `<span class="chip mono" style="cursor:pointer" onclick="act.fillSize('${sz}')" title="${lb}">${sz} <span class="hint">${lb}</span></span>`).join(' ')}</div>
+             <div id="spOut" class="note mt-2"><span class="hint">还没有换算。GPT 系走「最小改动吸附」（只修不合法的那一边，绝不放大一档）；Gemini 系只能给「档位 + 宽高比」，最终像素由上游档位表决定。</span></div>
            </div>
-           <div class="mt-2"><span class="hint">OpenAI 官方常用尺寸（点一下填进去）：</span>
-             ${act.OFFICIAL_SIZES.map(([sz, lb]) => `<span class="chip mono" style="cursor:pointer" onclick="act.fillSize('${sz}')" title="${lb}">${sz} <span class="hint">${lb}</span></span>`).join(' ')}</div>
-           <div id="spOut" class="mt-2"><span class="hint">填模型名 + 尺寸，看本服务最终会发给上游什么：GPT 系走「最小改动吸附」（只修不合法的那一边，绝不放大一档），Gemini 系只能给「档位 + 宽高比」，实际输出像素见结果。</span></div>
-         </div></div>`
+         </div>`
       : emptyBox('还没有配置任何模型', 'ti-sitemap');
   },
 

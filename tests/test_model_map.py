@@ -76,7 +76,8 @@ def test_channels_expose_preset_model_map(client, login):
     body = client.get("/api/channels").json()
     ch = {c["id"]: c for c in body["channels"]}
     assert ch["gemini_native"]["model_map"]["gemini-3.1-flash-image"] == "gemini-3.1-flash-image"
-    assert ch["fal_queue"]["model_map"]["gpt-image-2"] == "openai/gpt-image-2"
+    assert ch["qiniu"]["model_map"]["gpt-image-2"] == "openai/gpt-image-2"
+    assert ch["qiniu_fal"]["model_map"]["gpt-image-2"] == "openai/gpt-image-2"
     assert set(ch["openai_images"]["model_map"]) == set(ch["openai_images"]["models"])
 
 

@@ -49,7 +49,7 @@ class Channel:
 |---|---|---|
 | `native` | 上游就是这个协议，只做字段纠偏后透传 | `openai_images` |
 | `converted` | 由本服务把标准请求翻译成上游协议 | `gemini_native`、`change2pro` |
-| `queue` | 异步：提交 → 轮询 → 取结果 | `fal_queue` |
+| `queue` | 异步：提交 → 轮询 → 取结果 | `qiniu_fal`（七牛异步面） |
 
 ```python
 operations = {"generate": "native"}          # 只支持生成，edit 会被本地 400
@@ -108,7 +108,7 @@ return [{"url": u} for u in urls]
 | `call_upstream(url, headers, body, timeout=None)` | **唯一出站口**，返回 `(status, payload, text)` |
 | `extract_urls(payload)` | 从任意响应里挖 `(urls, error)` |
 | `set_path` / `remove_path` / `apply_removals` | 点号路径读写字段（支持 `*` 与数字下标，用于 `options.remove_params`） |
-| `build_gemini_native` / `build_openai_images` / `build_fal_queue` | 三种协议的现成实现，插件里可直接复用 |
+| `build_gemini_native` / `build_openai_images` / `build_fal_queue` | 三种协议的现成实现（**通用工具，不带任何一家中转的私货**），插件里可直接复用 |
 | `parse_gemini_native` / `parse_openai_images` / `poll_fal` | 对应的解析与轮询 |
 | `fal_endpoints(p, model, edit)` | 取 fal 的提交/查询端点（可被 `options` 覆盖） |
 
@@ -123,14 +123,23 @@ return [{"url": u} for u in urls]
 | `to_raw_b64(ref)` / `fetch_as_b64(ref, http)` | data URI / 裸 base64 / URL → `(mime, base64)`（URL 才会真的去取） |
 | `mask(secret, keep=6)` | 密钥打码 |
 
-## 4. 四个内置插件（参考实现）
+## 4. 内置插件（参考实现）
 
-| 插件 | 上游协议 | operations | 关键点 |
+> **命名铁律**：**谁家的插件用谁家的名字**。协议长得很像 ≠ 同一个协议 ——
+> 七牛、change2pro 这些中转站都是按自家接口改过的（路径、字段、返回结构、URL 有效期都不同），
+> 所以插件的 `id` / `label` / `vendor` / `docs` 一律按来源写，文档口径以该家官方为准。
+> 面板上的「渠道插件」下拉会显示 vendor + 官方文档链接 + 关键约束，就是为了不让人把形似协议混为一谈。
+>
+> **合并优先**：同一个站点、同一把 key 挂多套协议时，**写一个合并插件、在 New API 里只挂一个渠道**，
+> 内部按模型名分流（见 `change2pro`、`qiniu`）。能合一就不要拆成两个插件 / 两个渠道。
+
+| 插件 | 上游协议（口径来源） | operations | 关键点 |
 |---|---|---|---|
-| `gemini_native` | `POST /v1beta/models/{model}:generateContent` | `converted` | 参考图放 `contents[].parts[].inlineData.data`，**裸 base64，禁 `data:` 前缀**；尺寸走 `generationConfig.imageConfig.{imageSize,aspectRatio}` |
-| `openai_images` | `POST /v1/images/generations\|edits` | `native` | 只做字段纠偏后透传：尺寸吸附、`quality` 归一、按 `options.remove_params` 删上游不认的字段（如 `response_format`） |
-| `fal_queue` | `POST /queue/{...}` → 轮询 `/requests/{id}/status` | `queue` | 参考图**必须是公网 URL**（异步面拿不到本地文件）；结果 `images[].url` 是带签名的临时链接，会过期，所以不转存 |
-| `change2pro` | **合并插件**：同一站点两套协议 | `converted` | `face_of(model)` 按模型名分流：`gemini-*` 走 `generateContent`，其它走 `/images/generations`（注意**没有 `/v1`**）；一个实例、一把 key 覆盖两套协议 |
+| `gemini_native` | **Google 官方** `POST /v1beta/models/{model}:generateContent`（[文档](https://ai.google.dev/gemini-api/docs/image-generation)） | `converted` | 参考图放 `contents[].parts[].inlineData.data`，**裸 base64，禁 `data:` 前缀**；尺寸走 `generationConfig.imageConfig.{imageSize,aspectRatio}` |
+| `openai_images` | **OpenAI 官方** `POST /v1/images/generations\|edits`（[文档](https://platform.openai.com/docs/api-reference/images)） | `native` | 只做字段纠偏后透传：尺寸吸附、`quality` 归一、按 `options.remove_params` 删上游不认的字段（如 `response_format`） |
+| `qiniu_fal` | **七牛 ModelInk 自家**的 fal 风格异步队列：`POST /queue/{...}` → 轮询 `/requests/{id}/status`（**不是 fal.ai 官方协议**） | `queue` | 参考图**必须是公网 URL**（异步面拿不到本地文件）；结果 `images[].url` 是七牛 Kodo 签名链接（约 7 天），会过期，所以不转存 |
+| `qiniu` | **合并插件**：七牛 ModelInk 同步面 + fal 异步面 | `converted` | `face_of(model)` 按模型名分流：`gemini-*` 走七牛异步队列（`Authorization: Key`），`gpt-image-*` 走同步面（`Bearer`，固定 `b64_json`、**不认 `response_format`**，插件自动剔除）；一个实例覆盖两面 |
+| `change2pro` | **合并插件**：Change2Pro 同一站点两套协议 | `converted` | `face_of(model)` 按模型名分流：`gemini-*` 走 `generateContent`，其它走 `/images/generations`（注意**没有 `/v1`**）；一个实例、一把 key 覆盖两套协议 |
 
 > `change2pro` 也是「合并插件」的示范：当上游站点把多套协议挂在同一个域名同一把 key 下时，
 > 用一个插件内部按模型名分流，比在 New API 里配两个渠道更好维护。

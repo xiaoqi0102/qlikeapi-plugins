@@ -43,8 +43,13 @@ def discover(reload: bool = False) -> dict[str, Channel]:
     return REGISTRY
 
 
+# 历史 id → 现 id（改名后老数据仍能用；别名不出现在面板列表里）
+ALIASES = {"fal_queue": "qiniu_fal"}
+
+
 def get(channel_id: str) -> Channel | None:
-    return REGISTRY.get(channel_id or "")
+    cid = channel_id or ""
+    return REGISTRY.get(cid) or REGISTRY.get(ALIASES.get(cid, ""))
 
 
 def list_channels() -> list[dict]:

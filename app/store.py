@@ -25,7 +25,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS providers (
     key TEXT PRIMARY KEY,        -- 渠道实例名，如 change2pro-banana
     label TEXT,                  -- 显示名
-    protocol TEXT,               -- 渠道插件 id，如 gemini_native
+    protocol TEXT,               -- 渠道插件 id，如 gemini_native / qiniu
     base_url TEXT,
     auth_mode TEXT,              -- bearer | x-goog-api-key | fal_key
     api_key TEXT,                -- 多把 key 用换行分隔，按顺序轮换

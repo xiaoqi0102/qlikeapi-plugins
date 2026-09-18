@@ -25,6 +25,9 @@ class Channel:
     id: str = ""                      # 插件唯一标识，等于 providers.protocol 的值
     label: str = ""                   # 中文名，显示在控制台
     hint: str = ""                    # 一句话说明
+    vendor: str = ""                  # 协议归属方（谁家的协议就用谁的名字）
+    docs: str = ""                    # 官方文档地址（写口径时以它为准）
+    protocol_note: str = ""            # 该协议的关键约束 / 与形似协议的区别（面板上展示）
     auth_modes: tuple[str, ...] = ("bearer", "x-goog-api-key", "fal_key")
     default_auth: str = "bearer"
     default_base_url: str = ""
@@ -48,6 +51,7 @@ class Channel:
 
     def info(self) -> dict:
         return {"id": self.id, "label": self.label, "hint": self.hint,
+                "vendor": self.vendor, "docs": self.docs, "note": self.protocol_note,
                 "auth_modes": list(self.auth_modes), "default_auth": self.default_auth,
                 "default_base_url": self.default_base_url,
                 "operations": [{"operation": op, "mode": mode} for op, mode in self.operations.items()],

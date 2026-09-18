@@ -8,7 +8,7 @@ qlikeapi-plugins v3 —— 图片协议转换网关（挂在 New API 后面当�
 
 模块划分（都是小文件，改哪块看哪块）：
   store.py         SQLite：渠道实例、日志、用户、会话、健康度、异步任务
-  protocols.py     三种协议实现（gemini_native / openai_images / fal_queue）
+  protocols.py     协议实现（gemini_native / openai_images / qiniu_fal 队列）
   channels/        ★ 渠道插件目录：放一个 .py 就是一个新渠道类型，Web 上点「重载插件」即时生效
   relay.py         /up/<渠道>/v1/images/{generations,edits} 转发（含 key 轮换）
   admin.py         控制台 API：账号密码登录、渠道管理、插件重载、日志、探活
@@ -32,7 +32,7 @@ from . import admin, channels, relay, store
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 
-app = FastAPI(title="qlikeapi-plugins", version="3.10.1")
+app = FastAPI(title="qlikeapi-plugins", version="3.11.0")
 app.include_router(relay.router, prefix="/up", tags=["upstream"])
 app.include_router(relay.router_v1, prefix="/v1", tags=["router"])   # 统一入口：New API 只挂这一个渠道
 app.include_router(admin.router, tags=["admin"])

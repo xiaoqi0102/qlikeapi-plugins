@@ -243,7 +243,9 @@ def prepare(p: dict, body: dict, edit: bool) -> tuple[str, dict, dict]:
 def _shape_success(p: dict, body: dict, meta: dict, up_json: Any, headers: dict, provider: str, t0: float):
     """把上游结果归一化成 OpenAI 图片响应形状。"""
     ch = channels.get(p.get("protocol") or "")
-    if p.get("protocol") == "fal_queue":
+    # 走法由「插件本次请求的声明」决定（meta.mode），没有声明的回落到插件默认走法；
+    # 这样合并插件（如 qiniu：async + sync 两面）也能在一个插件里共存
+    if ((meta or {}).get("mode") or (ch.route_mode("generate") if ch else "")) == "queue":
         rid = (up_json or {}).get("request_id") or (up_json or {}).get("requestId")
         if not rid:
             urls, _ = protocols.extract_urls(up_json)
@@ -352,7 +354,7 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
             break
         idx, secret = pick["idx"], pick["key"]
         tried.add(idx)
-        headers = protocols.auth_headers(p.get("auth_mode") or "bearer", secret)
+        headers = protocols.auth_headers((meta or {}).get("auth_mode") or p.get("auth_mode") or "bearer", secret)
         try:
             status, up_json, up_text = protocols.call_upstream(url, headers, up_body)
         except Exception as e:
@@ -551,7 +553,7 @@ def _handle(provider: str, request: Request, edit: bool, dry: bool = False, prob
         except ValueError as e:
             return JSONResponse({"error": {"message": str(e), "type": "invalid_request_error"}}, status_code=400)
         shown = dict(up_body)
-        if p.get("protocol") in ("gemini_native", "change2pro") and "contents" in shown:
+        if "contents" in shown:
             shown["contents"] = f"<{len(json.dumps(up_body.get('contents'), ensure_ascii=False))} 字节 contents（含参考图 base64）>"
         return JSONResponse({"dry_run": True, "provider": provider, "plugin": p.get("protocol"),
                              "operations": ch.info()["operations"] if ch else [],
@@ -793,7 +795,8 @@ def selftest_provider(p: dict, model: str | None = None) -> dict:
     """
     m = model or protocols.default_model(p)
     body: dict[str, Any] = {"model": m, "prompt": "probe", "size": "1024x1024", "quality": "standard"}
-    if p.get("protocol") == "openai_images":
+    _ch = channels.get(p.get("protocol") or "")
+    if _ch and _ch.route_mode("generate") == "native":
         body["response_format"] = "b64_json"
     try:
         url, up_body, meta = prepare(p, body, False)
@@ -808,7 +811,7 @@ def selftest_provider(p: dict, model: str | None = None) -> dict:
         _log_probe(p, m, url, res, up_body=up_body)
         return res
     secret = entries[0]["key"]
-    headers = protocols.auth_headers(p.get("auth_mode") or "bearer", secret)
+    headers = protocols.auth_headers((meta or {}).get("auth_mode") or p.get("auth_mode") or "bearer", secret)
     t0 = time.time()
     try:
         status, up_json, up_text = protocols.call_upstream(url, headers, up_body, timeout=PROBE_TIMEOUT)

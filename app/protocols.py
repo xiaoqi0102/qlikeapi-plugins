@@ -3,7 +3,7 @@
 渠道插件可以直接调用这里的函数，也可以自己写一份（比如某家上游的怪癖太多）。
   · gemini_native : OpenAI 图片请求 ⇄ Gemini v1beta generateContent
   · openai_images : 标准 OpenAI 图片面（字段纠偏后透传）
-  · fal_queue     : fal 队列协议（提交 → 轮询 → 取结果 URL）
+  · fal_queue     : 异步队列协议（提交 → 轮询 → 取结果 URL；七牛 fal 风格面 = qiniu_fal 插件）
 """
 from __future__ import annotations
 

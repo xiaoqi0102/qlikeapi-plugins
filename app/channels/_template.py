@@ -2,7 +2,7 @@
 
 步骤：
   1. 复制成 my_relay.py（文件名随意，别以 _ 开头）
-  2. 改 id / label / hint / default_base_url / operations / models
+  2. 改 id / label / vendor / docs / hint / default_base_url / operations / models
   3. 实现 build()：把标准 OpenAI 图片请求翻译成上游要的格式，返回 (url, body, meta)
   4. 补两个测试：缺提示词必须报错 + 报文形状（见 tests/test_channels.py）
   5. Web 控制台点「重载插件」，然后新建一个该渠道的实例（填 base_url、key、模型映射）
@@ -25,6 +25,9 @@ from .base import Channel, ChannelError
 class MyRelay(Channel):
     id = "my_relay"                        # 唯一标识（= 渠道实例的 protocol 值）
     label = "我的中转（示例）"
+    vendor = "谁家的协议就写谁的名字"
+    docs = "https://上游官方文档"
+    protocol_note = "该协议的关键约束 / 与形似协议的区别（面板会展示）"
     hint = "一句话说明这个渠道怎么工作"
     auth_modes = ("bearer", "x-goog-api-key")   # 这个渠道支持哪些鉴权方式
     default_auth = "bearer"                     # bearer | x-goog-api-key | fal_key

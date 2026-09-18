@@ -5,7 +5,7 @@ import pytest
 
 from app import channels
 
-BUILTIN = ("gemini_native", "openai_images", "fal_queue", "change2pro")
+BUILTIN = ("gemini_native", "openai_images", "qiniu_fal", "qiniu", "change2pro")
 
 
 def provider_for(cid: str) -> dict:
@@ -108,11 +108,41 @@ def test_change2pro_parse_handles_both_faces():
     assert ch.parse({}) == []
 
 
-def test_fal_queue_declares_queue_mode():
-    ch = channels.get("fal_queue")
+def test_qiniu_fal_declares_queue_mode():
+    """七牛异步面：按来源命名（不是 fal.ai 官方协议），并声明 queue 走法。"""
+    ch = channels.get("qiniu_fal")
+    assert ch.id == "qiniu_fal"
     assert ch.route_mode("generate") == "queue"
     assert ch.supports("edit") is True
     assert ch.supports("nope") is False
+    assert "fal.ai" in (ch.protocol_note or "") or "非 fal.ai" in (ch.protocol_note or "")
+
+
+def test_legacy_plugin_id_still_resolves():
+    """改名后老数据（providers.protocol='fal_queue'）仍能解析到新插件。"""
+    assert channels.get("fal_queue") is channels.get("qiniu_fal")
+
+
+def test_qiniu_merged_plugin_routes_by_model():
+    """七牛合并插件：gemini 系走异步队列，gpt-image 系走同步面，且各自声明鉴权方式。"""
+    ch = channels.get("qiniu")
+    p = provider_for("qiniu")
+    url_f, up_f, meta_f = ch.build(p, {"model": "gemini-3.1-flash-image-preview", "prompt": "x"}, False)
+    assert meta_f["face"] == "fal" and meta_f["mode"] == "queue" and meta_f["auth_mode"] == "fal_key"
+    assert "/queue/" in url_f
+    url_s, up_s, meta_s = ch.build(p, {"model": "gpt-image-2", "prompt": "x"}, False)
+    assert meta_s["face"] == "sync" and meta_s["auth_mode"] == "bearer"
+    assert "response_format" not in up_s          # 七牛同步面不认这个字段
+    assert "/images/generations" in url_s
+
+
+def test_plugin_metadata_carries_vendor_and_docs():
+    """每个插件都要写清「谁家的协议 + 官方文档」，防止把形似协议混为一谈。"""
+    for cid in channels.available_ids():
+        c = channels.get(cid).info()
+        assert c["vendor"], f"{cid} 缺 vendor"
+        assert c["docs"].startswith("http"), f"{cid} 缺 docs"
+        assert c["hint"], f"{cid} 缺 hint"
 
 
 def test_unsupported_operation_mode():

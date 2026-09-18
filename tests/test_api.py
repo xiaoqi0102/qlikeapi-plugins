@@ -244,7 +244,7 @@ def test_providers_list_shape(client, login, make_provider):
 def test_channels_endpoint_lists_plugins(client, login):
     body = client.get("/api/channels").json()
     ids = {c["id"] for c in body["channels"]}
-    assert {"change2pro", "gemini_native", "openai_images", "fal_queue"} <= ids
+    assert {"change2pro", "gemini_native", "openai_images", "qiniu_fal", "qiniu"} <= ids
     assert body["errors"] == {}
 
 
