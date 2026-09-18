@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS health (
     provider TEXT PRIMARY KEY, ok INTEGER, upstream_status INTEGER,
     ms INTEGER, message TEXT, checked_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS settings (
+    scope TEXT PRIMARY KEY, data TEXT      -- 分组配置（JSON）：如 imagehost 图床
+);
 CREATE TABLE IF NOT EXISTS model_health (
     provider TEXT, model TEXT, ok INTEGER, upstream_status INTEGER,
     ms INTEGER, message TEXT, checked_at INTEGER,
@@ -258,6 +261,24 @@ def log_row(provider, model, path, status, up_status, ms, error, req, up_req, sn
             c.execute("DELETE FROM logs WHERE id < (SELECT MAX(id) FROM logs) - 5000")
     except Exception:
         pass
+
+
+def get_settings(scope: str) -> dict:
+    """读一组配置（JSON）。scope 例如 "imagehost"。"""
+    r = one("SELECT data FROM settings WHERE scope=?", (scope,))
+    if not r or not r.get("data"):
+        return {}
+    try:
+        v = json.loads(r["data"])
+        return v if isinstance(v, dict) else {}
+    except Exception:
+        return {}
+
+
+def set_settings(scope: str, data: dict) -> None:
+    execute("INSERT INTO settings(scope,data) VALUES(?,?)"
+            " ON CONFLICT(scope) DO UPDATE SET data=excluded.data",
+            (scope, json.dumps(data or {}, ensure_ascii=False)))
 
 
 def set_health(provider: str, res: dict) -> None:

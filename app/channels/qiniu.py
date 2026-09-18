@@ -36,6 +36,11 @@ class Qiniu(Channel):
         "gpt-image-2.5-sunburst": "openai/gpt-image-2.5-sunburst",
     }
 
+    def declared_ref_input(self, p: dict, body: dict, edit: bool) -> str:
+        """按「面」声明：异步面只认公网 URL；同步面文档没写公网 URL，就不猜、保持 base64。"""
+        up_model = protocols.upstream_model(p, body.get("model") or "")
+        return "url" if self.face_of(up_model) == "fal" else "base64"
+
     @staticmethod
     def face_of(upstream_model: str) -> str:
         """按上游模型名判断走哪一面：gemini 系 → 异步队列；其余 → 同步面。"""

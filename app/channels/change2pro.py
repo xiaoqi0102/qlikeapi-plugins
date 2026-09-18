@@ -31,6 +31,11 @@ class Change2Pro(Channel):
         "gpt-image-2": "gpt-image-2",
     }
 
+    def declared_ref_input(self, p: dict, body: dict, edit: bool) -> str:
+        """gemini 面走 inlineData（只吃 base64）；image2 面是 OpenAI 形状（两者都行）。"""
+        up_model = protocols.upstream_model(p, body.get("model") or "")
+        return "base64" if self.face_of(up_model) == "gemini_native" else "both"
+
     @staticmethod
     def face_of(upstream_model: str) -> str:
         """按上游模型名判断走哪个协议面。"""

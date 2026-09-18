@@ -536,10 +536,13 @@ def build_fal_queue(p: dict, body: dict, edit: bool = False) -> tuple[str, dict,
     wh = utils.parse_size(body.get("size"))
     is_gpt = "gpt" in up_model.lower()
     up: dict[str, Any] = {"prompt": prompt_of(body)}
-    urls = [r for r in utils.collect_refs(body) if r.startswith("http")]
-    if edit or urls:
-        if not urls:
-            raise ValueError("fal 异步面的参考图必须是公网 URL（fal 只拉 URL，不接受 base64/本地文件）")
+    refs = utils.collect_refs(body)
+    urls = [r for r in refs if r.startswith("http")]
+    # 客户端给了参考图却不是公网 URL → 本地报错。绝不静默丢图（那会变成「照文字重画一张」，
+    # 用户拿到的图跟参考图毫无关系，比报错更难排查）。
+    if (edit or refs) and not urls:
+        raise ValueError("fal 异步面的参考图必须是公网 URL（fal 只拉 URL，不接受 base64/本地文件）")
+    if urls:
         up["image_urls"] = urls
     size_meta: dict = {}
     if wh:

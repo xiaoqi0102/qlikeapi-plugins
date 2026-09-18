@@ -46,6 +46,7 @@
 | **多渠道路由** | 同一模型可挂多个渠道实例：优先级排序 + 权重分流 + 显式路由链（控制台可视化编辑） |
 | **故障切换** | `429 / 402 / 5xx / 连接失败` → 换下一家；**400 参数错立即返回**（不重复打）；**超时默认不切换**（防重复扣费） |
 | **自动熔断** | 连续失败到阈值自动停用；冷却到期后必须**探活通过**才放回路由（人工停用的永不被自动恢复） |
+| **参考图转直链** | 上游只认公网 URL 时（七牛 fal 异步面），自动把 base64 参考图换成图床直链再发；只认 base64 的渠道原样透传、绝不多绕一跳（按渠道官方文档协商） |
 | **零成本探活** | 自检/探活**递归抹掉一切提示词字段**再打上游，用 `4xx` 判定「链路可达」——永远不会因为点一下「探活」就真出图扣费 |
 | **密钥池与轮换** | 一个渠道可配多把 key（换行分隔），按轮换使用，失败自动冷却 |
 | **落库加密** | 渠道密钥 / 站点令牌入库即加密（Encrypt-then-MAC，纯标准库实现），历史明文自动迁移 |
@@ -254,6 +255,7 @@ make test && make lint
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | 全部环境变量、令牌、价格与余额取数配置 |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker 部署、反代、接入 New API、备份升级回滚 |
 | [docs/SMART-ROUTING-PLAN.md](docs/SMART-ROUTING-PLAN.md) | 智能路由与负载/并发控制调研（New API / Sub2API）+ 整合规划 |
+| [docs/IMAGEHOST.md](docs/IMAGEHOST.md) | **参考图公网直链层**：按渠道能力协商的转换范围、图床候选链与各家字段口径、配置项、边界红线 |
 | [docs/SIZE-MAPPING.md](docs/SIZE-MAPPING.md) | **尺寸换算规则**：客户端像素 → 上游实际尺寸（GPT 自由尺寸四条硬限制、Gemini 档位×比例像素表，均附官方出处） |
 | [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) | UI 设计规范：设计变量、组件库清单、交互约定、变更流程与坑清单 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 已做 / 计划 / **明确不做**（含理由） |

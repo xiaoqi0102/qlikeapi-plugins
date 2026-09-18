@@ -21,7 +21,8 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from . import channels, protocols, store
+from . import channels, imagehost, protocols, store
+from .channels.base import ChannelError
 
 router = APIRouter()
 RETRYABLE = (402, 408, 409, 425, 429, 500, 502, 503, 504, 529)
@@ -233,11 +234,26 @@ def _merge_files(body: dict) -> dict:
 
 
 def prepare(p: dict, body: dict, edit: bool) -> tuple[str, dict, dict]:
-    """交给渠道插件翻译；插件不存在或出错都在这里报清楚。"""
+    """交给渠道插件翻译；插件不存在或出错都在这里报清楚。
+
+    **参考图能力协商**在翻译之前做：有的上游只认公网 URL（七牛 fal 异步面），
+    客户端却给 base64 —— 那就先换成图床直链再翻译；只认 base64 的（Gemini inlineData）
+    原样透传，绝不白绕一跳。转换范围由插件按各家官方文档声明（channels.base.ref_input）。
+    """
     ch = channels.get(p.get("protocol") or "")
     if not ch:
         raise ValueError(f"渠道插件 '{p.get('protocol')}' 未注册（可用：{', '.join(channels.available_ids())}）")
-    return ch.build(p, body, edit)
+    notes: list[dict] = []
+    policy = ch.ref_policy(p, body, edit)
+    if policy != "base64":
+        try:
+            body, _fail, notes = imagehost.apply_to_body(body, policy, None, edit)
+        except imagehost.UploadFailed as exc:
+            raise ChannelError(f"参考图转换失败（base64 → 公网直链）：{exc}") from exc
+    url, up, meta = ch.build(p, body, edit)
+    if notes:
+        meta["imagehost"] = notes
+    return url, up, meta
 
 
 def _shape_success(p: dict, body: dict, meta: dict, up_json: Any, headers: dict, provider: str, t0: float):
@@ -311,6 +327,16 @@ def _size_info(meta: dict) -> dict:
         return {}
     return {"size_from": meta.get("size_from"), "size_to": meta.get("size_to"),
             "size_note": meta.get("size_note"), "size_hdr": meta.get("size_hdr")}
+
+
+def _imagehost_info(meta: dict) -> dict:
+    """图床转换结果：响应头只放 ASCII（host 名 + 张数），中文说明走日志详情。"""
+    notes = [n for n in ((meta or {}).get("imagehost") or []) if n.get("host")]
+    if not notes:
+        return {}
+    hosts = list(dict.fromkeys(n["host"] for n in notes))
+    return {"imagehost": ",".join(hosts), "imagehost_n": len(notes),
+            "imagehost_note": "；".join(f"参考图 {n['bytes'] // 1024}KB → {n['host']}" for n in notes)}
 
 
 def _countable_failure(status: int | None) -> bool:
@@ -400,7 +426,7 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
                           up_url=url, up_method="POST", up_headers=_redact_headers(headers, secret))
         return out, {"ms": int((time.time() - t0) * 1000), "upstream_status": status,
                      "images": images, "cost": cost, "currency": currency, "attempts": attempt,
-                     **_size_info(meta)}
+                     **_size_info(meta), **_imagehost_info(meta)}
 
     msg = f"渠道 '{provider}' 所有 key 均不可用或已进冷却"
     if last:
@@ -580,6 +606,8 @@ def _handle(provider: str, request: Request, edit: bool, dry: bool = False, prob
     resp.headers["X-QLike-Queue-Ms"] = str(queue_ms)
     if info.get("size_hdr"):
         resp.headers["X-QLike-Size"] = info["size_hdr"]      # 尺寸被换过 → 明确告诉客户端
+    if info.get("imagehost"):
+        resp.headers["X-QLike-Imagehost"] = info["imagehost"]  # 参考图走了图床 → 告诉客户端
     return resp
 
 
@@ -687,6 +715,8 @@ def _handle_router(request: Request, edit: bool):
             resp.headers["X-QLike-Chain"] = ",".join(chain_names)
             resp.headers["X-QLike-Attempt"] = str(attempt)
             resp.headers["X-QLike-Degrade"] = str(tier_idx)     # 0 = 首档即成功，没降级
+            if info.get("imagehost"):
+                resp.headers["X-QLike-Imagehost"] = info["imagehost"]
             resp.headers["X-QLike-Queue-Ms"] = str(queue_ms)
             if info.get("size_hdr"):
                 resp.headers["X-QLike-Size"] = info["size_hdr"]

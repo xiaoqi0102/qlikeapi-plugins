@@ -33,6 +33,7 @@ class MyRelay(Channel):
     default_auth = "bearer"                     # bearer | x-goog-api-key | fal_key
     default_base_url = "https://api.example.com"
     operations = {"generate": "native", "edit": "native"}
+    ref_input = "base64"          # url / both / base64 —— 按该家官方文档声明参考图形态
     #            ↑ 操作名         ↑ native 原样透传 | converted 本服务翻译 | queue 异步提交+轮询
     models = {"example-image-1": "example-image-1"}   # 预置模型名 → 上游真实名
 

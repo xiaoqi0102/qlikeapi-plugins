@@ -26,6 +26,8 @@ class GeminiNative(Channel):
     default_auth = "x-goog-api-key"
     default_base_url = "https://generativelanguage.googleapis.com"
     operations = {"generate": "converted", "edit": "converted"}
+    # 官方只吃 parts[].inlineData（裸 base64），不吃 URL → 不转换
+    ref_input = "base64"
     models = {
         "gemini-3.1-flash-image": "gemini-3.1-flash-image",
         "gemini-3-pro-image": "gemini-3-pro-image",

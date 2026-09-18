@@ -29,6 +29,8 @@ class OpenAIImages(Channel):
     default_auth = "bearer"
     default_base_url = ""
     operations = {"generate": "native", "edit": "native"}
+    # 官方 image 参数同时接受 URL 与 base64 data URI → 按用户口径「优先公网 URL」
+    ref_input = "both"
     models = {
         "gpt-image-2": "gpt-image-2",
         "gpt-image-2.5-flare": "openai/gpt-image-2.5-flare",

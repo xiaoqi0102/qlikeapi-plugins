@@ -80,6 +80,17 @@ operations = {"generate": "queue", "edit": "queue"}
    （带超时、统一日志、测试可打桩）。
 3. 图片**不落盘**：只处理 URL / base64 的搬运与翻译。
 
+### 2.2.1 `ref_input`：参考图形态（按官方文档声明，别猜）
+
+| 值 | 含义 | 谁负责转换 |
+|---|---|---|
+| `url` | 只认公网 URL（如七牛 fal 异步队列） | 网关在图床层转好再交给你；图床不可用 → 本地 400 |
+| `both` | URL / base64 都支持 | 优先公网 URL，图床挂了回落 base64 |
+| `base64` | 只认 base64（如 Gemini `inlineData`） | 不转，原样透传 |
+
+合并插件（一个渠道按模型分流到多个「面」）重写 `declared_ref_input()` 按面细化。
+细节、图床候选链、加图床的步骤见 [`IMAGEHOST.md`](IMAGEHOST.md)。
+
 ### 2.3 `parse(payload) -> list[dict]`
 
 把上游响应翻译成 OpenAI 形状的 `data` 数组：`[{"url": "..."}]` 或 `[{"b64_json": "..."}]`。

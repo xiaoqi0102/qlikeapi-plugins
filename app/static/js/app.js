@@ -1654,7 +1654,105 @@ const act = {
   },
 
   /* -------------------- 设置 -------------------- */
+  /* ---------------- 图床（参考图 base64 → 公网直链） ---------------- */
+
+  async loadImagehost() {
+    const box = $('#ihBox'); if (!box) return;
+    const r = await api('/api/settings/imagehost');
+    if (!r || !r.ok || !r.data) { box.innerHTML = '<div class="hint">读取失败</div>'; return; }
+    const d = r.data, cfg = d.cfg || {}, chain = (cfg.chain || []).slice();
+    state.ih = d;
+    const ids = (d.hosts || []).map(h => h.id);
+    const order = chain.concat(ids.filter(id => !chain.includes(id)));
+    const byId = {}; (d.hosts || []).forEach(h => byId[h.id] = h);
+    $('#ihState').innerHTML = cfg.enabled ? pill('ok', '已启用') : '<span class="pill">未启用</span>';
+    box.innerHTML = `
+      <div class="form-check form-switch mb-2">
+        <input class="form-check-input" type="checkbox" id="ihEnabled" ${cfg.enabled ? 'checked' : ''}>
+        <label class="form-check-label" for="ihEnabled">启用图床转换（只对「只认公网 URL」「两者都支持」的渠道生效；只认 base64 的渠道永不走图床）</label>
+      </div>
+      <div class="hint">候选顺序：从上到下依次尝试，第一个成功即用。未勾选的不会被使用。</div>
+      <div class="mt-2">${order.map(id => {
+        const h = byId[id] || {id, label: id, ttl: '', note: '', endpoint: ''};
+        const on = chain.includes(id);
+        return `<div class="d-flex align-items-start gap-2 py-1">
+          <input type="checkbox" class="form-check-input mt-1" data-ih="${esc(id)}" ${on ? 'checked' : ''}>
+          <div class="flex-grow-1">
+            <b>${esc(h.label)}</b> <span class="chip">${esc(h.ttl)}</span>
+            ${!on ? '<span class="chip">已停用</span>' : ''}
+            ${h.needs_key && !d.imgbb_key_set ? '<span class="chip warn">未配 Key → 自动跳过</span>' : ''}
+            <div class="hint">${esc(h.note)} · <span class="mono">${esc(h.endpoint)}</span></div>
+          </div>
+          <button class="btn btn-sm btn-outline-secondary" title="上移" onclick="act.ihMove('${esc(id)}',-1)"><i class="ti ti-arrow-up"></i></button>
+          <button class="btn btn-sm btn-outline-secondary" title="下移" onclick="act.ihMove('${esc(id)}',1)"><i class="ti ti-arrow-down"></i></button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="act.ihTest('${esc(id)}')">自检</button>
+        </div>`; }).join('')}</div>
+      <hr>
+      <div class="row g-2">
+        <div class="col-md-6"><label class="form-label">ImgBB API Key
+          ${d.imgbb_key_set ? '（已配置 <span class="mono">' + esc(d.imgbb_key_masked) + '</span>，留空=不改）' : '（不填则跳过 ImgBB）'}</label>
+          <input id="ihKey" class="form-control" autocomplete="off" placeholder="${d.imgbb_key_set ? '••••••••' : '粘贴 API Key'}"></div>
+        <div class="col-md-3"><label class="form-label">Litterbox 有效期</label>
+          <select id="ihTtl" class="form-select">${['1h', '12h', '24h', '72h'].map(t =>
+            `<option ${cfg.litterbox_time === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        <div class="col-md-3"><label class="form-label">最大体积 MB / 上传超时 s</label>
+          <div class="d-flex gap-2">
+            <input id="ihMb" class="form-control" type="number" min="1" max="20" value="${esc(cfg.max_mb)}">
+            <input id="ihTo" class="form-control" type="number" min="5" max="120" value="${esc(cfg.timeout_s)}">
+          </div></div>
+      </div>
+      <div class="hint mt-2"><i class="ti ti-alert-triangle"></i> 参考图会被上传到上面选中的<b>第三方公共服务</b>（临时链接，会过期）。
+        别拿它传私密素材。本服务本身不落盘、不转存：只有「渠道官方文档只认公网 URL」时才转。</div>
+      <div class="d-flex gap-2 mt-3 align-items-center flex-wrap">
+        <button class="btn btn-primary" onclick="act.ihSave()"><i class="ti ti-device-floppy"></i> 保存</button>
+        <button class="btn btn-outline-secondary" onclick="act.ihTest()"><i class="ti ti-upload"></i> 上传 1×1 自检图</button>
+        <span class="hint">自检=真上传一张 1×1 像素图（不调用任何生图接口、不花钱）</span>
+      </div>
+      <div class="hint mt-2" id="ihMsg"></div>`;
+  },
+
+  async ihSave() {
+    const on = $$('#ihBox input[data-ih]').filter(x => x.checked).map(x => x.dataset.ih);
+    const order = $$('#ihBox [data-ih]').map(x => x.dataset.ih);
+    const body = {enabled: $('#ihEnabled').checked, chain: order.filter(id => on.includes(id)),
+                  litterbox_time: $('#ihTtl').value, max_mb: +$('#ihMb').value, timeout_s: +$('#ihTo').value};
+    const k = ($('#ihKey').value || '').trim();
+    if (k) body.imgbb_key = k;
+    const r = await api('/api/settings/imagehost', {method: 'POST', body});
+    if (r && r.ok) { toast('图床设置已保存'); act.loadImagehost(); } else toast('保存失败', true);
+  },
+
+  async ihMove(id, dir) {
+    const d = state.ih; if (!d) return;
+    const chain = (d.cfg.chain || []).slice();
+    const ids = (d.hosts || []).map(h => h.id);
+    const order = chain.concat(ids.filter(x => !chain.includes(x)));
+    const i = order.indexOf(id), k = i + dir;
+    if (i < 0 || k < 0 || k >= order.length) return;
+    [order[i], order[k]] = [order[k], order[i]];
+    const on = $$('#ihBox input[data-ih]').filter(x => x.checked).map(x => x.dataset.ih);
+    const r = await api('/api/settings/imagehost', {method: 'POST', body: {chain: order.filter(x => on.includes(x))}});
+    if (r && r.ok) act.loadImagehost(); else toast('调整顺序失败', true);
+  },
+
+  async ihTest(host) {
+    const msg = $('#ihMsg');
+    if (msg) msg.textContent = '上传中…（最长 30 秒）';
+    const r = await api('/api/settings/imagehost/test', {method: 'POST', body: host ? {host} : {}});
+    if (!r || !r.ok) {
+      const m = (r && r.data && r.data.error && r.data.error.message) || '自检失败';
+      if (msg) msg.innerHTML = '<span class="chip warn">' + esc(m) + '</span>';
+      return toast(m, true);
+    }
+    const d = r.data;
+    if (msg) msg.innerHTML = `✅ <b>${esc(d.host)}</b> 可用 → <a class="mono" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.url)}</a>`
+      + (d.verified ? '' : ` <span class="chip warn">回读未通过：${esc(d.verify_note || '')}</span>`)
+      + (d.warnings && d.warnings.length ? ` <span class="hint">（前面失败：${esc(d.warnings.join('；'))}）</span>` : '');
+    toast('图床自检通过：' + d.host);
+  },
+
   async loadSettings() {
+    act.loadImagehost();
     const r = await api('/api/sysinfo');
     if (!r) return;
     const d = r.data;

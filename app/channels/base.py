@@ -34,6 +34,11 @@ class Channel:
     operations: dict[str, str] = {"generate": "native", "edit": "native"}
     # native=原样透传 converted=本服务翻译 queue=异步提交+轮询
     models: dict[str, Any] = {}       # 预置模型名 → 上游真实名（可被渠道实例的 model_map 覆盖）
+    # 参考图形态（按**该家官方文档**声明，别猜）：
+    #   url    只认公网 URL（如七牛的 fal 异步面，它只拉 URL）→ base64 必须转图床直链，转不了就报错
+    #   both   两种都支持 → 优先公网 URL，图床不可用时回落 base64 内联（不因此失败）
+    #   base64 只认 base64（如 Gemini 的 inlineData）→ 原样透传，不做任何转换
+    ref_input: str = "base64"
 
     # ---- 行为（子类实现） ----
     def build(self, p: dict, body: dict, edit: bool) -> tuple[str, dict, dict]:
@@ -41,6 +46,25 @@ class Channel:
 
     def parse(self, payload: Any) -> list[dict]:
         return []
+
+    # ---- 参考图能力协商 ----
+    def declared_ref_input(self, p: dict, body: dict, edit: bool) -> str:
+        """插件声明的参考图形态；合并插件（按模型分流）可在这里按「面」细化。"""
+        return self.ref_input if self.ref_input in ("url", "both", "base64") else "base64"
+
+    def ref_policy(self, p: dict, body: dict, edit: bool) -> str:
+        """本次请求实际采用的策略：插件声明 + 渠道实例级覆盖（options.ref_prefer）。
+
+        实例级开关是「出问题时的应急阀门」：填 inline 一律内联 base64（不上传），
+        填 url 则强制转公网直链 —— 不用改代码就能按渠道微调。
+        """
+        base = self.declared_ref_input(p, body, edit)
+        pref = str((p.get("options") or {}).get("ref_prefer") or "").lower()
+        if pref == "inline":
+            return "base64"
+        if pref == "url" and base == "base64":
+            return "url"
+        return base
 
     # ---- 工具 ----
     def supports(self, operation: str) -> bool:
@@ -55,6 +79,10 @@ class Channel:
                 "auth_modes": list(self.auth_modes), "default_auth": self.default_auth,
                 "default_base_url": self.default_base_url,
                 "operations": [{"operation": op, "mode": mode} for op, mode in self.operations.items()],
+                "ref_input": self.ref_input,
+                "ref_input_note": {"url": "只认公网 URL（参考图会自动转图床直链）",
+                                   "both": "URL / base64 都支持（优先公网 URL）",
+                                   "base64": "只认 base64（参考图原样透传）"}.get(self.ref_input, ""),
                 "models": sorted(self.models.keys()),
                 # 预置映射（客户端名 → 上游真名）：面板「同步最新支持模型」与预设药丸用它
                 "model_map": {k: (v if isinstance(v, str) else "upstream" in v and v.get("upstream") or k)

@@ -15,7 +15,7 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from . import balances, channels, crypto, protocols, relay, store, utils
+from . import balances, channels, crypto, imagehost, protocols, relay, store, utils
 
 router = APIRouter(prefix="/api")
 
@@ -193,6 +193,71 @@ def api_providers(request: Request):
             "endpoint": f"/up/{p['key']}",
         })
     return out
+
+
+# ------------------------------------------------------------------ 图床（参考图 base64 → 公网直链）
+
+def _imagehost_view() -> dict:
+    """给面板看的配置：Key 只回掩码，绝不回明文。"""
+    cfg = imagehost.settings()
+    key = cfg.pop("imgbb_key", "") or ""
+    return {"ok": True, "cfg": cfg, "imgbb_key_set": bool(key),
+            "imgbb_key_masked": store.mask(key) if key else "",
+            "default_chain": imagehost.DEFAULT_CHAIN,
+            "hosts": [{"id": k, "label": v["label"], "endpoint": v["endpoint"], "ttl": v["ttl"],
+                       "needs_key": v["needs_key"], "note": v["note"],
+                       "usable": (not v["needs_key"]) or bool(key)}
+                      for k, v in imagehost.HOSTS.items()]}
+
+
+@router.get("/settings/imagehost")
+async def api_imagehost_get(request: Request):
+    u, err = need_user(request)
+    if err:
+        return err
+    return _imagehost_view()
+
+
+@router.post("/settings/imagehost")
+async def api_imagehost_save(request: Request):
+    u, err = need_user(request)
+    if err:
+        return err
+    d = await request.json()
+    try:
+        imagehost.save_settings(d or {})
+    except Exception as exc:
+        return JSONResponse({"error": {"message": f"保存失败：{exc}"}}, status_code=400)
+    return _imagehost_view()
+
+
+@router.post("/settings/imagehost/test")
+async def api_imagehost_test(request: Request):
+    """自检：真上传一张 1×1 PNG，确认图床链路能给出可访问的公网直链。
+
+    这是**用户主动点击**才会发生的唯一「真上传」动作；不会调用任何生图接口、不产生费用。
+    """
+    u, err = need_user(request)
+    if err:
+        return err
+    d = {}
+    try:
+        d = await request.json()
+    except Exception:
+        pass
+    cfg = imagehost.settings()
+    chain = [d["host"]] if d.get("host") in imagehost.HOSTS else imagehost.chain_of(cfg)
+    if not chain:
+        return JSONResponse({"error": {"message": "没有可用图床：先在下面开启并配好 Key"}},
+                            status_code=400)
+    try:
+        url, host, failures = imagehost.upload_with_fallback(imagehost.TEST_PNG, "image/png",
+                                                             cfg, chain)
+    except imagehost.UploadFailed as exc:
+        return JSONResponse({"ok": False, "error": {"message": str(exc)}}, status_code=400)
+    ok, why = imagehost.verify_url(url, cfg)
+    return {"ok": True, "host": host, "url": url, "verified": ok, "verify_note": why,
+            "warnings": failures, "bytes": len(imagehost.TEST_PNG)}
 
 
 @router.post("/providers")
