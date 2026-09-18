@@ -96,6 +96,30 @@ def test_change2pro_face_of():
     assert ch.face_of("") == "openai_images"
 
 
+def test_change2pro_edit_translates_refs_to_images_array():
+    """站点改图面只认 `images:[{image_url}]`，不认 OpenAI 的 `image:[...]`。
+
+    实测：传 image 会 400 `images[].image_url is required`。客户端零改动，由插件吸收这层差异。
+    """
+    ch = channels.get("change2pro")
+    p = provider_for("change2pro")
+    ref = "data:image/png;base64,QUJD"
+    url, up, _ = ch.build(p, {"model": "gpt-image-2", "prompt": "换装", "image": [ref]}, True)
+    assert url.endswith("/images/edits")
+    assert up["images"] == [{"image_url": ref}]
+    assert "image" not in up
+
+    # 多图 + 客户端用对象写法，同样归一
+    _, up2, _ = ch.build(p, {"model": "gpt-image-2", "prompt": "x",
+                             "image": [{"image_url": "https://a.test/1.png"}, "https://a.test/2.png"]}, True)
+    assert up2["images"] == [{"image_url": "https://a.test/1.png"}, {"image_url": "https://a.test/2.png"}]
+
+    # 生成面（无参考图）不动：仍走 /images/generations，且不凭空造 images 字段
+    _, up3, _ = ch.build(p, {"model": "gpt-image-2", "prompt": "x"}, False)
+    assert "images" not in up3 and "image" not in up3
+
+
+
 def test_change2pro_parse_handles_both_faces():
     ch = channels.get("change2pro")
     gemini_payload = {"candidates": [{"content": {"parts": [

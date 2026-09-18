@@ -1,3 +1,16 @@
+## v3.14.2 — 2026-09-19
+
+### 修复
+- **change2pro 改图面字段口径**：站点（sub2api）改图面只认 `images:[{image_url: ...}]`，不认 OpenAI 的
+  `image:[...]` —— 之前一律 400 `images[].image_url is required`。现在由插件层自动翻译，**客户端零改动**。
+  实测：改成 `images[]` 后校验通过（进而走到账号池 503，与字段口径无关）。
+- **熔断重复计数**：全部 key 已在冷却里的「短路」请求（`attempts=0`，根本没打上游）不再计入渠道级
+  `fail_streak`。此前一串请求（或一次探针）就能把整条渠道顶到阈值自动停用 10 分钟 —— 实测踩到过。
+
+### 测试
+- 新增 `tests/test_breaker.py`：① 短路不计数；② 真失败够阈值仍会熔断。
+- 新增 `tests/test_channels.py::test_change2pro_edit_translates_refs_to_images_array`。
+
 ## v3.14.1 — 数字字段规范化（修「客户端把 n 发成字符串导致上游 400」）
 
 **现象**：出图失败，上游回

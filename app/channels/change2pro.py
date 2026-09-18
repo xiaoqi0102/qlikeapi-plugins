@@ -48,8 +48,33 @@ class Change2Pro(Channel):
             url, up, meta = protocols.build_gemini_native(p, body, edit)
         else:
             url, up, meta = protocols.build_openai_images(p, body, edit)
+            if edit:
+                self._refs_to_images_array(up)
         meta["face"] = self.face_of(up_model)
         return url, up, meta
+
+    @staticmethod
+    def _refs_to_images_array(up: dict) -> None:
+        """站点口径：改图面的参考图要 `images:[{image_url: ...}]`，不认 OpenAI 的 `image:[...]`。
+
+        实测（2026-09-19）：传 `image:[...]` 一律 400
+        `{"message": "images[].image_url is required"}`；改成 `images:[{image_url}]` 后校验通过
+        （进而走到账号池 503）。客户端零改动 —— 这层差异由插件吸收。
+        """
+        refs = up.pop("image", None)
+        if refs is None:
+            refs = up.get("images")
+        if not refs:
+            return
+        if isinstance(refs, str):
+            refs = [refs]
+        items = []
+        for r in refs:
+            u = (r.get("image_url") or r.get("url") or "") if isinstance(r, dict) else str(r)
+            if u:
+                items.append({"image_url": u})
+        if items:
+            up["images"] = items
 
     def parse(self, payload) -> list[dict]:
         data = protocols.parse_gemini_native(payload)

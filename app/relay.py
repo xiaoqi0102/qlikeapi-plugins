@@ -442,7 +442,9 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
                       last[0] if last else None, int((time.time() - t0) * 1000), msg, body, None, None,
                       kind=log_kind, attempts=len(tried), token=tk_name, token_id=tk_id,
                       up_url=url, up_method="POST")
-    store.bump_provider_fail(provider, msg, disconnect=True)   # 整条渠道的 key 都不行了 → 计入熔断
+    if tried:      # 真打过上游才算一次失败：全部 key 在冷却里的「短路」不该重复计数，
+                   # 否则一串请求（或探针）就能把整条渠道熔断掉。
+        store.bump_provider_fail(provider, msg, disconnect=True)
     return JSONResponse({"error": {"message": msg, "type": "upstream_error", "provider": provider,
                                    "attempts": len(tried)}}, status_code=503), {"ms": int((time.time() - t0) * 1000)}
 
