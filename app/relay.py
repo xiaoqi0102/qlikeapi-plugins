@@ -438,7 +438,8 @@ def resolve_chain(model: str, exclude: set[str] | None = None) -> list[dict]:
     for p in store.list_providers(only_enabled=True):
         if p["key"] in exclude:
             continue
-        if model and model in (p.get("model_map") or {}):
+        # 通配符规则也算「这个渠道支持该模型」（gemini-3* 命中 gemini-3-pro-image）
+        if model and protocols.match_model(p, model) in (p.get("model_map") or {}):
             full = store.get_provider(p["key"])
             if full:
                 out.append(full)

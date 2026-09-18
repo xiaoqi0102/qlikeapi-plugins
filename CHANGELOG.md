@@ -13,6 +13,46 @@
 - 价格页支持批量导入/导出（CSV）
 - 渠道实例分组与标签筛选
 
+## [3.9.0] - 2026-09-18
+
+### 渠道实例的「模型映射」按 sub2api 的逻辑与界面重做
+
+读了 sub2api 的源码（`frontend/src/composables/useModelWhitelist.ts` +
+`components/account/ModelWhitelistSelector.vue` + `EditAccountModal.vue`）后按同一套口径实现：
+
+**存储规则一致**：sub2api 用一个对象 `{请求模型: 实际模型}` 存两件事 ——
+`from == to` 属于**白名单**，`from != to` 属于**映射**（对应其 `splitModelMappingObject` /
+`buildModelMappingObject('combined', …)`）。我们的 `model_map` 结构本来就一样，所以直接沿用这套拆分/合并。
+
+### Added
+
+- **「模型限制（可选）」双 Tab**：模型白名单 / 模型映射，替换原来只有一个 JSON 文本框的写法
+  （JSON 编辑移到「高级」折叠区保留，能力不减）。
+- **模型白名单**：多选下拉（复用组件库 `UI.picker`，带搜索、全选/清空、已选计数、chips 展示），
+  三个零成本按钮 ——「同步最新支持模型」（插件预置）/「同步上游支持的模型」（`GET /v1/models`，
+  带前缀的自动建成映射）/「清除所有模型」，以及「自定义模型名称 + 填入」。
+- **模型映射**：`请求模型 → 实际模型` 成对输入行（可增删）+ 整宽虚线「+ 添加映射」+
+  一排**预置药丸**（按模型家族上色，点一下即添加）。
+- **通配符支持**（与 sub2api 同口径）：左侧 `gemini-3*` 合法（`*` 只能一个且在末尾），
+  右侧不允许 `*`；多条命中取**最长规则**；路由层也认通配符（`gemini-3*` 能接住 `gemini-3-pro-image`）。
+  前后端各校验一道，非法保存直接 400。
+- `GET /api/channels` 增加 `model_map`（插件预置映射），供面板渲染药丸与「同步最新支持模型」。
+- `protocols.is_valid_wildcard()` / `validate_model_map()` / `wildcard_keys()`；
+  `model_list()` 标注 `wildcard`；`default_model()` 优先取非通配符模型。
+
+### Changed
+
+- `match_model()` 增加通配符兜底（精确 → 最长通配符规则），`resolve_chain()` 同步支持
+  （原先严格 `model in model_map`，通配符规则接不住请求）。
+- 渠道列表的「密钥」列同时显示分组数量，展开行显示「密钥分组（模型 → 用哪一组）」。
+
+### Tests
+
+- 新增 `tests/test_model_map.py`（8 个用例）：通配符校验、最长规则优先、默认模型跳过通配符、
+  `model_list` 标注、**通配符真的改写到了上游请求**（断言上游 URL 里的模型名）、
+  插件预置映射接口、保存非法通配符返回 400。
+- 全量 **298 passed**，`ruff` 干净。
+
 ## [3.8.0] - 2026-09-18
 
 ### 背景（用户反馈 + 实测确认）

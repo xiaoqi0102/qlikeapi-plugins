@@ -36,6 +36,13 @@
     return Math.floor(d / 86400) + ' 天前';
   };
 
+  /** 通配符校验（与后端 protocols.is_valid_wildcard 同口径）：* 只能有一个且必须在末尾 */
+  UI.validWildcard = function (v) {
+    const s = String(v == null ? '' : v);
+    const i = s.indexOf('*');
+    return i < 0 || (i === s.length - 1 && s.lastIndexOf('*') === i);
+  };
+
   UI.fmtMs = (v) => (v == null ? '—' : (v >= 1000 ? (v / 1000).toFixed(1) + 's' : Math.round(v) + 'ms'));
 
   UI.cur = (u) => (u === 'CNY' ? '¥' : '$');

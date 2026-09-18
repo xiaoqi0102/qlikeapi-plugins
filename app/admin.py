@@ -204,6 +204,10 @@ async def api_provider_upsert(request: Request):
     if not key:
         return JSONResponse({"error": "key required"}, status_code=400)
     old = store.get_provider(key) or {}
+    if d.get("model_map") is not None:
+        bad = protocols.validate_model_map(d.get("model_map"))
+        if bad:
+            return JSONResponse({"error": bad}, status_code=400)
     keys_in = d.get("api_key")
     if keys_in is None:
         api_key = old.get("api_key") or ""

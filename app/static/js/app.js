@@ -790,16 +790,43 @@ const act = {
             ${p ? '留空则不改动现有 key；当前：' + (p.keys||[]).map(k => (k.label ? k.label + '::' : '') + k.masked).join(' / ') : ''}</div>
           <div id="grpOut" class="mt-2"></div></div>
         <div class="col-12">
-          <div class="d-flex align-items-center justify-content-between mb-1" style="gap:8px;flex-wrap:wrap">
-            <label class="form-label mb-0">模型映射（JSON：{"客户端模型名": "上游真实名"}）</label>
-            <div class="acts">
-              <button class="btn btn-sm btn-outline-secondary" onclick="act.fetchUpModels()"><i class="ti ti-cloud-download"></i> 拉取上游模型</button>
-              <button class="btn btn-sm btn-outline-secondary" onclick="act.tidyModels()"><i class="ti ti-arrows-sort"></i> 整理去重</button>
-            </div>
+          <label class="form-label">模型限制<span class="hint"> 可选；留空＝这个渠道的所有模型都放行</span></label>
+          <div class="mtabs">
+            <button type="button" class="mtab on" data-tab="white" onclick="act.mapTab('white')"><i class="ti ti-circle-check"></i> 模型白名单</button>
+            <button type="button" class="mtab" data-tab="map" onclick="act.mapTab('map')"><i class="ti ti-arrows-exchange"></i> 模型映射</button>
           </div>
-          <textarea class="form-control" id="fModels">${esc(p ? JSON.stringify(Object.fromEntries((p.models||[]).map(m => [m.id, m.upstream])), null, 2) : '{\n  "gpt-image-2": "openai/gpt-image-2"\n}')}</textarea>
-          <div class="hint mt-1">「拉取上游模型」是零成本 GET（只读上游 /v1/models，绝不出图）；重复命名的模型只保留一条。</div>
+          <div id="mapWhite">
+            <div id="mapPick"></div>
+            <div class="mtools">
+              <button class="btn btn-sm btn-outline-primary" onclick="act.mapSyncPreset()"><i class="ti ti-sparkles"></i> 同步最新支持模型</button>
+              <button class="btn btn-sm btn-outline-success" onclick="act.mapSyncUpstream(this)"><i class="ti ti-cloud-download"></i> 同步上游支持的模型</button>
+              <button class="btn btn-sm btn-outline-danger" onclick="act.mapClear()"><i class="ti ti-eraser"></i> 清除所有模型</button>
+            </div>
+            <label class="form-label">自定义模型名称</label>
+            <div class="row" style="gap:8px;margin:0">
+              <input class="form-control" id="mapCustom" style="flex:1 1 auto" placeholder="输入自定义模型名称（回车即可填入）"
+                     onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();act.mapAddCustom();}">
+              <button class="btn btn-primary" style="flex:0 0 auto" onclick="act.mapAddCustom()">填入</button>
+            </div>
+            <div class="mcount" id="mapCount"></div>
+          </div>
+          <div id="mapMap" hidden>
+            <div class="mnote"><i class="ti ti-info-circle" style="margin-top:1px"></i>
+              <span>将请求模型映射到实际模型，左边是请求的模型，右边是发送到 API 的实际模型。<br>
+              左边支持通配符（<code>gemini-3*</code>，<code>*</code> 只能有一个且在末尾）；右边不能含通配符。</span></div>
+            <div id="mapRows"></div>
+            <button type="button" class="madd" onclick="act.mapAddRow()"><i class="ti ti-plus"></i> 添加映射</button>
+            <div class="k">快捷添加（本插件的预置模型，点一下即添加）</div>
+            <div class="mpills" id="mapPills"></div>
+          </div>
           <div id="upModels" class="mt-2"></div>
+          <details class="mt-2"><summary class="hint" style="cursor:pointer">高级：直接编辑 JSON（与上面的可视化编辑等价）</summary>
+            <textarea class="form-control mt-2" id="fModels" rows="6"></textarea>
+            <div class="acts mt-2">
+              <button class="btn btn-sm btn-outline-secondary" onclick="act.tidyModels()"><i class="ti ti-arrows-sort"></i> 整理去重</button>
+              <button class="btn btn-sm btn-outline-secondary" onclick="act.mapResetFromJson()"><i class="ti ti-refresh"></i> 用 JSON 重置上面的编辑</button>
+            </div>
+          </details>
         </div>
         <div class="col-md-8"><label class="form-label">渠道微调 options（JSON，可选）</label>
           <textarea class="form-control" id="fOptions">${esc(JSON.stringify(p?.options || {}, null, 2))}</textarea>
@@ -825,6 +852,221 @@ const act = {
       </div>`,
       `<button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
        <button class="btn btn-primary" onclick="act.providerSave('${esc(key || '')}')">保存</button>`);
+    act.mapInit(p);
+  },
+
+  /* ==================== 模型限制（白名单 / 映射，逻辑与 UI 参照 sub2api） ====================
+
+     sub2api 的存储是一个对象 {请求模型: 实际模型}，界面上分成两段：
+       · from === to  → 属于「模型白名单」（精确放行这些模型）
+       · from !== to  → 属于「模型映射」（把请求模型改写成实际发送的模型）
+     我们的 model_map 结构完全一致，所以直接沿用同一套拆分/合并规则：
+       拆分 splitModelMappingObject / 合并 buildModelMappingObject('combined', ...)
+     额外保留 sub2api 的通配符能力：左边支持 `gemini-3*`（* 只能一个且在末尾），右边不能带 *。 */
+
+  mapInit(p, fromJson) {
+    const items = (p && p.models) || [];
+    if (fromJson) {
+      // 从 JSON 高级编辑区反向读回
+      let mm = {};
+      try { mm = JSON.parse($('#fModels').value || '{}'); } catch { return toast('JSON 不合法，没法重置', true); }
+      const allowed = [], maps = [];
+      Object.entries(mm).forEach(([k, v]) => {
+        if (typeof v !== 'string' || !k.trim() || !v.trim()) return;
+        (k.trim() === v.trim()) ? allowed.push(k.trim()) : maps.push({from: k.trim(), to: v.trim()});
+      });
+      state.map = {allowed, maps, plugin: state.map ? state.map.plugin : null, extra: state.map ? state.map.extra : [], picker: null};
+    } else {
+      state.map = {
+        allowed: items.filter(m => !m.aliased && !m.wildcard).map(m => m.id),
+        maps: items.filter(m => m.aliased || m.wildcard).map(m => ({from: m.id, to: m.upstream || m.id})),
+        plugin: state.plugins.find(x => x.id === ((p && p.protocol) || '')) || null,
+        extra: [],
+        picker: null,
+      };
+    }
+    act.mapTab('white');
+    act.mapRender();
+  },
+
+  mapFamily(name) {
+    const n = String(name || '').toLowerCase();
+    if (n.includes('gemini')) return 'gemini';
+    if (n.includes('gpt') || n.includes('dall')) return 'gpt';
+    if (n.includes('claude')) return 'claude';
+    if (n.includes('grok')) return 'grok';
+    return '';
+  },
+
+  mapCandidates() {
+    const s = state.map || {allowed: [], extra: []};
+    const out = [], seen = new Set();
+    const push = (v, hint) => {
+      const k = String(v || '').trim();
+      if (!k || seen.has(k.toLowerCase())) return;
+      seen.add(k.toLowerCase());
+      out.push({value: k, label: k, hint: hint || ''});
+    };
+    Object.keys((s.plugin && s.plugin.model_map) || {}).forEach(m => push(m, '插件预置'));
+    (s.extra || []).forEach(m => push(m, '已同步'));
+    (s.allowed || []).forEach(m => push(m, ''));
+    return out;
+  },
+
+  mapRender() {
+    const s = state.map;
+    if (!s || !$('#mapPick')) return;
+    // 白名单多选下拉（复用组件库的 UI.picker）
+    if (s.picker) { try { s.picker.close(); } catch (e) {} s.picker = null; }
+    document.querySelectorAll('body > .pk-pop').forEach(e => e.remove());
+    $('#mapPick').innerHTML = '';
+    s.picker = UI.picker('#mapPick', {
+      items: act.mapCandidates(), selected: s.allowed, maxChips: 24,
+      placeholder: '点这里选择这个渠道支持的模型（留空＝支持所有模型）', searchPlaceholder: '搜索模型…',
+      onChange: (v) => { state.map.allowed = v; act.mapSync(); },
+    });
+    // 映射行
+    $('#mapRows').innerHTML = (s.maps || []).map((m, i) => `
+      <div class="mrow ${UI.validWildcard(m.from) ? '' : 'bad'}">
+        <input class="form-control form-control-sm" value="${esc(m.from)}" placeholder="请求模型"
+               oninput="act.mapSet(${i},'from',this.value)">
+        <i class="ti ti-arrow-right"></i>
+        <input class="form-control form-control-sm" value="${esc(m.to)}" placeholder="实际模型"
+               oninput="act.mapSet(${i},'to',this.value)">
+        <button class="ibtn danger" title="删除" onclick="act.mapDelRow(${i})"><i class="ti ti-trash"></i></button>
+      </div>`).join('') || '<span class="hint">还没有映射：点下面的「添加映射」，或直接用预置模型一键加。</span>';
+    // 预置药丸（按模型家族上色）
+    const presets = Object.entries((s.plugin && s.plugin.model_map) || {});
+    $('#mapPills').innerHTML = presets.map(([from, to]) => {
+      const has = (s.maps || []).some(m => m.from === from && m.to === to);
+      return `<button type="button" class="mpill ${act.mapFamily(from)} ${has ? 'on' : ''}"
+        title="${esc(from)} → ${esc(to)}" onclick="act.mapAddPreset('${esc(from)}','${esc(to)}')">
+        ${has ? '✓' : '+'} ${esc(from)}</button>`;
+    }).join('') || '<span class="hint">该插件没有预置模型，可手动添加映射</span>';
+    act.mapSync();
+  },
+
+  mapSet(i, side, v) {
+    if (!state.map || !state.map.maps[i]) return;
+    state.map.maps[i][side] = v;
+    // 左侧通配符格式不对时立刻把这一行标红（不整块重渲染，避免输入框失焦）
+    if (side === 'from') {
+      const row = document.querySelectorAll('#mapRows .mrow')[i];
+      if (row) row.classList.toggle('bad', !UI.validWildcard(v));
+    }
+    act.mapSync();
+  },
+  mapAddRow() { state.map.maps.push({from: '', to: ''}); act.mapRender(); },
+  mapDelRow(i) { state.map.maps.splice(i, 1); act.mapRender(); },
+  mapAddPreset(from, to) {
+    const s = state.map;
+    if (s.maps.some(m => m.from === from && m.to === to)) return act.mapDelRow(s.maps.findIndex(m => m.from === from && m.to === to));
+    s.maps.push({from, to});
+    act.mapRender();
+    toast('已添加映射 ' + from + ' → ' + to);
+  },
+  mapAddCustom() {
+    const v = ($('#mapCustom').value || '').trim();
+    if (!v) return toast('先填模型名', true);
+    if (v.includes('*')) return toast('白名单里不能放通配符，想用通配符请切到「模型映射」', true);
+    if (state.map.allowed.some(x => x.toLowerCase() === v.toLowerCase())) return toast('已经在白名单里了', true);
+    state.map.allowed.push(v);
+    state.map.extra.push(v);
+    $('#mapCustom').value = '';
+    act.mapRender();
+    toast('已加入 ' + v);
+  },
+  mapSyncPreset() {
+    const s = state.map;
+    const keys = Object.keys((s.plugin && s.plugin.model_map) || {});
+    if (!keys.length) return toast('该插件没有预置模型', true);
+    let n = 0;
+    keys.forEach(k => { if (!s.allowed.some(x => x.toLowerCase() === k.toLowerCase())) { s.allowed.push(k); n++; } });
+    act.mapRender();
+    toast(n ? ('已加入 ' + n + ' 个预置模型') : '预置模型都在白名单里了');
+  },
+  async mapSyncUpstream(btn) {
+    const key = ($('#fKey').value || '').trim();
+    if (!key) return toast('先填实例名并保存渠道，才能同步上游模型', true);
+    if (btn) btn.disabled = true;
+    try {
+      const r = await api('/api/providers/' + encodeURIComponent(key) + '/fetch-models', { method: 'POST' });
+      if (!r) return;
+      if (!r.ok) return toast(r.data.error || '同步失败', true);
+      const list = (r.data && r.data.models) || [];
+      const n = act.mapAddUpstream(list);
+      act.renderUpList(r.data, n);
+      toast(n ? ('已从上游同步 ' + n + ' 个新模型（上游共 ' + list.length + ' 个）')
+              : ('上游 ' + list.length + ' 个模型均已在白名单/映射里'));
+    } finally { if (btn) btn.disabled = false; }
+  },
+  mapAddUpstream(list) {
+    const s = state.map;
+    let n = 0;
+    (list || []).forEach(raw => {
+      const up = String(raw || '').trim();
+      if (!up) return;
+      const bare = up.includes('/') ? up.split('/').pop() : up;      // fal-ai/xxx → xxx
+      s.extra.push(bare);
+      if (s.maps.some(m => m.from === bare)) return;                  // 已经是映射的键：别再加进白名单（保存时映射会覆盖白名单）
+      if (up.includes('/')) {                                        // 带前缀的上游名 → 建一条映射
+        if (!s.maps.some(m => m.from === bare && m.to === up)) { s.maps.push({from: bare, to: up}); n++; }
+      } else if (!s.allowed.some(x => x.toLowerCase() === bare.toLowerCase())) { s.allowed.push(bare); n++; }
+    });
+    act.mapRender();
+    return n;
+  },
+  renderUpList(d, added) {
+    const host = $('#upModels');
+    if (!host) return;
+    host.innerHTML = `<div class="hint">上游 <span class="mono">${esc(d.url || '')}</span> 去重后 <b>${d.count || 0}</b> 个模型；
+      本次新增 <b>${added || 0}</b> 个（带 <span class="mono">/</span> 的按「裸名 → 带前缀真实名」建映射，其余进白名单）
+      <button class="btn btn-sm btn-link" onclick="act.upModelsHide()">收起</button></div>
+      <div class="row" style="gap:4px">${((d.models || []).slice(0, 60)).map(m => `<span class="chip mono">${esc(m)}</span>`).join(' ')}</div>`;
+  },
+  mapClear() {
+    UI.confirm('清除这个渠道的模型白名单与映射？（点保存后生效）', {okText: '清除'}).then(ok => {
+      if (!ok) return;
+      state.map.allowed = [];
+      state.map.maps = [];
+      act.mapRender();
+      toast('已清除，记得点保存');
+    });
+  },
+  mapTab(which) {
+    if (!state.map) state.map = {allowed: [], maps: [], extra: [], picker: null};
+    state.map.tab = which;
+    UI.$$('.mtab').forEach(b => b.classList.toggle('on', b.dataset.tab === which));
+    const w = $('#mapWhite'), m = $('#mapMap');
+    if (w) w.hidden = which !== 'white';
+    if (m) m.hidden = which !== 'map';
+    if (which === 'white' && state.map.picker) { try { state.map.picker.close(); } catch (e) {} }
+  },
+  mapResetFromJson() { act.mapInit(null, true); toast('已按 JSON 重置编辑区'); },
+
+  /** 把可视化编辑合并回 model_map（规则与 sub2api 的 buildModelMappingObject('combined') 一致）：
+      白名单项写成 from=to、跳过通配符；映射项照写，右边禁带通配符；同一键后者覆盖前者。 */
+  mapSync() {
+    const s = state.map || {allowed: [], maps: []};
+    const out = {};
+    (s.allowed || []).forEach(m => {
+      const v = String(m || '').trim();
+      if (v && !v.includes('*')) out[v] = v;
+    });
+    (s.maps || []).forEach(({from, to}) => {
+      const a = String(from || '').trim(), b = String(to || '').trim();
+      if (a && b && !b.includes('*')) out[a] = b;
+    });
+    const el = $('#fModels');
+    if (el) el.value = JSON.stringify(out, null, 2);
+    const c = $('#mapCount');
+    if (c) {
+      const bad = (s.maps || []).filter(m => m.from && !UI.validWildcard(m.from)).length;
+      c.innerHTML = `已选择 <b>${(s.allowed || []).length}</b> 个模型` +
+        (s.maps && s.maps.length ? `　·　<b>${s.maps.length}</b> 条映射` : '') +
+        (!(s.allowed || []).length && !(s.maps || []).length ? '　<span class="hint">（留空＝支持该渠道的全部模型）</span>' : '') +
+        (bad ? `　<span class="t-err">有 ${bad} 条映射的通配符格式不对（* 只能一个且在末尾）</span>` : '');
+    }
   },
 
   /* -------------------- 密钥分组：探测每把 key 属于哪个分组（零成本 GET /v1/models） -------------------- */
@@ -846,62 +1088,9 @@ const act = {
     toast('分组已更新，保存渠道后生效');
   },
 
-  /* -------------------- 模型映射：拉取上游模型列表（零成本 GET） -------------------- */
+  /* -------------------- 上游模型列表（零成本 GET /v1/models，不出图） -------------------- */
 
-  async fetchUpModels() {
-    const key = ($('#fKey').value || '').trim();
-    const host = $('#upModels');
-    if (!host) return;
-    if (!key) return toast('先填实例名并保存渠道，才能拉取上游模型', true);
-    host.innerHTML = '<div class="hint"><span class="spinner-border spinner-border-sm"></span> 正在向上游拉取模型列表（只读，不出图）…</div>';
-    const r = await api('/api/providers/' + encodeURIComponent(key) + '/fetch-models', { method: 'POST' });
-    if (!r) { host.innerHTML = ''; return; }
-    if (!r.ok) { host.innerHTML = `<div class="hint" style="color:var(--err)">${esc(r.data.error || '拉取失败')}</div>`; return; }
-    state.upLast = r.data;
-    act.renderUpModels(r.data, []);
-  },
-
-  renderUpModels(d, selected) {
-    const host = $('#upModels');
-    if (!host) return;
-    let have = {};
-    try { have = JSON.parse($('#fModels').value || '{}'); } catch { have = {}; }
-    const haveKeys = new Set(Object.keys(have));
-    const items = (d.models || []).map(m => ({ value: m, label: m, hint: haveKeys.has(m) ? '已在映射里' : '' }));
-    host.innerHTML = `<div class="d-flex align-items-center justify-content-between mb-1" style="gap:8px;flex-wrap:wrap">
-        <span class="hint">上游 <span class="mono">${esc(d.url)}</span> · 去重后 <b>${d.count}</b> 个模型</span>
-        <div class="acts">
-          <button class="btn btn-sm btn-outline-secondary" onclick="act.upModelsAll()">全选未添加</button>
-          <button class="btn btn-sm btn-primary" onclick="act.upModelsAdd()"><i class="ti ti-plus"></i> 加入映射</button>
-          <button class="btn btn-sm btn-outline-secondary" onclick="act.upModelsHide()">收起</button>
-        </div></div>
-      <div id="upPick"></div>`;
-    state._upPicker = UI.picker('#upPick', { items, selected: selected || [], search: true,
-      placeholder: '选择要加入映射的模型…', searchPlaceholder: '搜索模型名…' });
-  },
-
-  upModelsAll() {
-    let have = {};
-    try { have = JSON.parse($('#fModels').value || '{}'); } catch { have = {}; }
-    const rest = ((state.upLast && state.upLast.models) || []).filter(m => !(m in have));
-    if (state._upPicker) state._upPicker.set(rest);
-    toast(rest.length ? `已选中 ${rest.length} 个未添加的模型` : '没有可添加的模型了');
-  },
-
-  upModelsAdd() {
-    const pick = state._upPicker ? state._upPicker.values : [];
-    if (!pick.length) return toast('先选模型（可点「全选未添加」）', true);
-    let map = {};
-    try { map = JSON.parse($('#fModels').value || '{}'); } catch { map = {}; }
-    let added = 0;
-    pick.forEach(m => { if (!(m in map)) { map[m] = m; added++; } });     // 去重：已在映射里的跳过
-    const sorted = {};
-    Object.keys(map).sort().forEach(k => { sorted[k] = map[k]; });
-    $('#fModels').value = JSON.stringify(sorted, null, 2);
-    toast(added ? `已加入 ${added} 个模型（重复的已跳过）` : '选中的模型都已在映射里');
-    act.renderUpModels(state.upLast || { models: [], count: 0, url: '' }, pick);
-  },
-
+  async fetchUpModels() { return act.mapSyncUpstream(); },
   upModelsHide() {
     const host = $('#upModels');
     if (host) host.innerHTML = '';
@@ -930,8 +1119,13 @@ const act = {
   async providerSave(existing) {
     const key = ($('#fKey').value || existing || '').trim();
     if (!key) return toast('实例名必填', true);
+    act.mapSync();                                   // 保存前把可视化编辑同步回 JSON
     let model_map, options;
     try { model_map = JSON.parse($('#fModels').value || '{}'); } catch { return toast('模型映射不是合法 JSON', true); }
+    const badWild = Object.keys(model_map).filter(k => !UI.validWildcard(k));
+    if (badWild.length) return toast(`通配符格式不对（* 只能有一个且在末尾）：${badWild[0]}`, true);
+    const badTo = Object.entries(model_map).find(([, v]) => String(v).includes('*'));
+    if (badTo) return toast(`上游真实名不能含通配符：${badTo[0]} → ${badTo[1]}`, true);
     try { options = JSON.parse($('#fOptions').value || '{}'); } catch { return toast('options 不是合法 JSON', true); }
     const conc = parseInt($('#fConc')?.value || '0', 10) || 0;      // 阶段 1：并发闸门
     const rt = Math.min(2, parseInt($('#fRetry')?.value || '0', 10) || 0);  // 阶段 1：同档重试

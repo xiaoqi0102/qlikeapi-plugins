@@ -56,6 +56,43 @@ def prompt_of(body: dict) -> str:
     return str(body.get("prompt") or body.get("text") or "").strip()
 
 
+def is_valid_wildcard(pattern: str) -> bool:
+    """通配符校验（与 sub2api 同口径）：`*` 只能有一个且必须在末尾。
+
+    `claude-*` 合法；`claude-*-x`、`a*b`、`*abc` 一律非法。
+    """
+    s = str(pattern or "")
+    i = s.find("*")
+    if i < 0:
+        return True
+    return i == len(s) - 1 and s.rfind("*") == i
+
+
+def validate_model_map(mm: Any) -> str | None:
+    """保存前校验 model_map：返回中文错误（None = 通过）。后端也守一道，别只靠前端。"""
+    if mm is None:
+        return None
+    if not isinstance(mm, dict):
+        return "模型映射必须是一个对象（客户端模型名 → 上游真实名）"
+    for name, entry in mm.items():
+        key = str(name).strip()
+        up = entry.get("upstream") if isinstance(entry, dict) else entry
+        up = str(up or "").strip()
+        if not key:
+            return "模型名不能为空"
+        if "*" in up:
+            return f"上游真实名不能含通配符：{key} → {up}"
+        if not is_valid_wildcard(key):
+            return f"通配符格式不对（* 只能有一个且必须在末尾）：{key}"
+    return None
+
+
+def wildcard_keys(mm: dict) -> list[str]:
+    """model_map 里的通配符键，最长（最具体）的排前面 —— 匹配时优先用它。"""
+    ks = [str(k) for k in (mm or {}) if str(k).endswith("*") and is_valid_wildcard(str(k))]
+    return sorted(ks, key=len, reverse=True)
+
+
 def match_model(p: dict, client_model: str) -> str:
     """把客户端传来的模型名归一到 model_map 里的「标准写法」（大小写不敏感、忽略首尾空格）。
 
@@ -69,6 +106,10 @@ def match_model(p: dict, client_model: str) -> str:
     low = m.lower()
     for name in mm:
         if str(name).lower() == low:
+            return name
+    # 通配符兜底（sub2api 同款能力）：`gemini-3*` 这类规则命中任意前缀，最长规则优先
+    for name in wildcard_keys(mm):
+        if low.startswith(name[:-1].lower()):
             return name
     return m
 
@@ -186,7 +227,12 @@ def upstream_model(p: dict, client_model: str) -> str:
 
 
 def default_model(p: dict) -> str:
-    return next(iter(p.get("model_map") or {}), "")
+    """渠道的默认模型（探活用）：优先取确定名字的模型，避免拿到通配符规则。"""
+    mm = p.get("model_map") or {}
+    for name in mm:
+        if "*" not in str(name):
+            return str(name)
+    return next(iter(mm), "")
 
 
 def model_list(p: dict) -> list[dict]:
@@ -199,7 +245,8 @@ def model_list(p: dict) -> list[dict]:
             continue
         seen.add(name)
         up = entry.get("upstream") if isinstance(entry, dict) else entry
-        out.append({"id": name, "upstream": up or name, "aliased": bool(up and up != name)})
+        out.append({"id": name, "upstream": up or name, "aliased": bool(up and up != name),
+                    "wildcard": name.endswith("*")})
     return out
 
 

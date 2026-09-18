@@ -138,10 +138,10 @@ curl -s -X POST "http://127.0.0.1:18673/up/change2pro/v1/images/preview" \
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/channels` | 已装载的渠道插件（含 `operations`、预置模型） |
+| GET | `/api/channels` | 已装载的渠道插件（含 `operations`、`models` 预置模型清单、`model_map` 预置映射） |
 | POST | `/api/channels/reload` | 热重载插件目录（加插件后不用重启） |
 | GET | `/api/providers` | 渠道实例列表（密钥只回 `{"index","masked","label"}`；另带 `key_groups` 分组汇总：标签/把数/已知模型） |
-| POST | `/api/providers` | 新建/更新实例（密钥会加密入库） |
+| POST | `/api/providers` | 新建/更新实例（密钥加密入库；`model_map` 会校验通配符格式与右侧禁用 `*`，非法 → 400） |
 | POST | `/api/providers/{key}/patch` | 轻量改：`enabled` / `priority` / `weight`（即时生效） |
 | DELETE | `/api/providers/{key}` | 删除实例 |
 | POST | `/api/providers/{key}/test?model=<模型>` | 零成本探活，返回逐模型结果 |
@@ -224,7 +224,7 @@ gemini 与 gpt 常常不同组）—— 同一个渠道里放多组密钥，路�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/healthz` | `{"ok":true,"app":"qlikeapi-plugins","version":"3.8.0","plugins":[…],"plugin_errors":{},"providers":[…]}` |
+| GET | `/healthz` | `{"ok":true,"app":"qlikeapi-plugins","version":"3.9.0","plugins":[…],"plugin_errors":{},"providers":[…]}` |
 | GET | `/` | 控制台页面（未登录跳 `/login`） |
 | GET | `/static/*` | 前端静态资源 |
 

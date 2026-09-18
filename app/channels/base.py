@@ -51,4 +51,7 @@ class Channel:
                 "auth_modes": list(self.auth_modes), "default_auth": self.default_auth,
                 "default_base_url": self.default_base_url,
                 "operations": [{"operation": op, "mode": mode} for op, mode in self.operations.items()],
-                "models": sorted(self.models.keys())}
+                "models": sorted(self.models.keys()),
+                # 预置映射（客户端名 → 上游真名）：面板「同步最新支持模型」与预设药丸用它
+                "model_map": {k: (v if isinstance(v, str) else "upstream" in v and v.get("upstream") or k)
+                              for k, v in self.models.items()}}

@@ -851,3 +851,36 @@ body.dark .kit-code{background:#111a28;border-color:var(--line)}
 .tb-dir td.src-col .src-note { display: inline-block; max-width: calc(100% - 74px); margin-left: 6px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; color: var(--muted); font-weight: 400; }
 .tb-dir td .chip { margin: 1px 0; }
+
+
+/* =============================================================== 模型限制（白名单 / 映射）
+   参照 sub2api 的两段式：上面两个 Tab 切换「模型白名单」与「模型映射」，
+   白名单是一个多选下拉（复用 .pk-*），映射是「请求模型 → 实际模型」的成对输入行 + 预置药丸。 */
+.mtabs{display:flex;gap:var(--sp-2);margin:var(--sp-2) 0 var(--sp-3)}
+.mtab{flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px var(--sp-3);
+  font-size:var(--fs-base);font-weight:500;border:0;border-radius:var(--r-sm);background:var(--field);
+  color:var(--muted);cursor:pointer;transition:background var(--dur),color var(--dur)}
+.mtab:hover{background:var(--brand-soft);color:var(--brand)}
+.mtab.on{background:var(--brand-soft);color:var(--brand)}
+.mtab.on[data-tab="map"]{background:var(--fam-claude-soft);color:var(--fam-claude)}
+.mnote{display:flex;align-items:flex-start;gap:6px;background:var(--fam-claude-soft);color:var(--fam-claude);
+  border-radius:var(--r-sm);padding:8px 10px;font-size:var(--fs-sm);margin-bottom:var(--sp-3)}
+.mrow{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-2)}
+.mrow .form-control{flex:1 1 0;min-width:0}
+.mrow > .ti{color:var(--muted);flex:0 0 auto}
+.mrow.bad .form-control{border-color:var(--err);box-shadow:0 0 0 3px var(--err-soft)}
+.madd{width:100%;border:2px dashed var(--line);background:transparent;border-radius:var(--r-sm);
+  padding:7px var(--sp-3);color:var(--muted);font-size:var(--fs-sm);margin-bottom:var(--sp-3);cursor:pointer;
+  transition:border-color var(--dur),color var(--dur)}
+.madd:hover{border-color:var(--brand);color:var(--brand)}
+.mpill{display:inline-flex;align-items:center;gap:5px;border:1px solid transparent;border-radius:var(--r-sm);
+  padding:3px 10px;font-size:var(--fs-sm);cursor:pointer;background:var(--fam-other-soft);color:var(--fam-other);
+  transition:border-color var(--dur)}
+.mpill.gemini{background:var(--fam-gemini-soft);color:var(--fam-gemini)}
+.mpill.gpt{background:var(--fam-gpt-soft);color:var(--fam-gpt)}
+.mpill.claude{background:var(--fam-claude-soft);color:var(--fam-claude)}
+.mpill.grok{background:var(--fam-grok-soft);color:var(--fam-grok)}
+.mpill:hover{border-color:currentColor}
+.mpill.on{opacity:.62}
+.mcount{font-size:var(--fs-sm);color:var(--muted);margin-top:var(--sp-2)}
+.mtools{display:flex;flex-wrap:wrap;gap:var(--sp-2);margin:var(--sp-3) 0}

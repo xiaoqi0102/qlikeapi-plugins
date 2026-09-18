@@ -1,7 +1,11 @@
 /* tokens.css —— qlikeapi-plugins 设计变量（唯一来源）
  *
  * 只放变量：颜色、圆角、阴影、字号、间距、动效时长。
- * 深色模式只覆盖变量值（body.dark），组件 CSS 里禁止写死颜色。
+ * 深色模式只覆盖变量值（body.dark {
+  /* 模型家族（深色） */
+  --fam-gemini-soft:#0c2634; --fam-gpt-soft:#0f2a1c; --fam-claude-soft:#1d1735;
+  --fam-grok-soft:#1a2231; --fam-other-soft:#16243c;
+组件 CSS 里禁止写死颜色。
  * 规范：docs/DESIGN-SYSTEM.md ｜ 预览：/ui-kit
  */
 
@@ -23,6 +27,12 @@
   --ring:0 0 0 3px rgba(47,107,255,.22);
   --brand-soft:#eef3ff; --ok-soft:#e9f8ef; --warn-soft:#fdf4e6; --err-soft:#fdeeee;
   --line-2:#eef1f6;
+  /* 模型家族配色（预设药丸按模型名自动归类用；浅/深色各一套） */
+  --fam-gemini:#0284c7; --fam-gemini-soft:#e6f4fc;
+  --fam-gpt:#15803d; --fam-gpt-soft:#e8f7ee;
+  --fam-claude:#6d28d9; --fam-claude-soft:#f2ecfe;
+  --fam-grok:#475569; --fam-grok-soft:#eef1f6;
+  --fam-other:#2f6bff; --fam-other-soft:#eef3ff;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
 }
 
