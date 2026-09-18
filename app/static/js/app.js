@@ -874,7 +874,6 @@ const act = {
           <div id="mapWhite">
             <div id="mapPick"></div>
             <div class="mtools">
-              <button class="btn btn-sm btn-outline-primary" onclick="act.mapSyncPreset()"><i class="ti ti-sparkles"></i> 同步最新支持模型</button>
               <button class="btn btn-sm btn-outline-success" onclick="act.mapSyncUpstream(this)"><i class="ti ti-cloud-download"></i> 同步上游支持的模型</button>
               <button class="btn btn-sm btn-outline-danger" onclick="act.mapClear()"><i class="ti ti-eraser"></i> 清除所有模型</button>
             </div>
@@ -892,8 +891,6 @@ const act = {
               左边支持通配符（<code>gemini-3*</code>，<code>*</code> 只能有一个且在末尾）；右边不能含通配符。</span></div>
             <div id="mapRows"></div>
             <button type="button" class="madd" onclick="act.mapAddRow()"><i class="ti ti-plus"></i> 添加映射</button>
-            <div class="k">快捷添加（本插件的预置模型，点一下即添加）</div>
-            <div class="mpills" id="mapPills"></div>
           </div>
           <div id="upModels" class="mt-2"></div>
           <details class="mt-2"><summary class="hint" style="cursor:pointer">高级：直接编辑 JSON（与上面的可视化编辑等价）</summary>
@@ -970,15 +967,6 @@ const act = {
     act.mapRender();
   },
 
-  mapFamily(name) {
-    const n = String(name || '').toLowerCase();
-    if (n.includes('gemini')) return 'gemini';
-    if (n.includes('gpt') || n.includes('dall')) return 'gpt';
-    if (n.includes('claude')) return 'claude';
-    if (n.includes('grok')) return 'grok';
-    return '';
-  },
-
   mapCandidates() {
     const s = state.map || {allowed: [], extra: []};
     const out = [], seen = new Set();
@@ -988,7 +976,7 @@ const act = {
       seen.add(k.toLowerCase());
       out.push({value: k, label: k, hint: hint || ''});
     };
-    Object.keys((s.plugin && s.plugin.model_map) || {}).forEach(m => push(m, '插件预置'));
+    // 候选来源只有两个：上游同步过的（已同步）+ 当前已选 —— 不再混入插件自带的预置模型
     (s.extra || []).forEach(m => push(m, '已同步'));
     (s.allowed || []).forEach(m => push(m, ''));
     return out;
@@ -1015,15 +1003,7 @@ const act = {
         <input class="form-control form-control-sm" value="${esc(m.to)}" placeholder="实际模型"
                oninput="act.mapSet(${i},'to',this.value)">
         <button class="ibtn danger" title="删除" onclick="act.mapDelRow(${i})"><i class="ti ti-trash"></i></button>
-      </div>`).join('') || '<span class="hint">还没有映射：点下面的「添加映射」，或直接用预置模型一键加。</span>';
-    // 预置药丸（按模型家族上色）
-    const presets = Object.entries((s.plugin && s.plugin.model_map) || {});
-    $('#mapPills').innerHTML = presets.map(([from, to]) => {
-      const has = (s.maps || []).some(m => m.from === from && m.to === to);
-      return `<button type="button" class="mpill ${act.mapFamily(from)} ${has ? 'on' : ''}"
-        title="${esc(from)} → ${esc(to)}" onclick="act.mapAddPreset('${esc(from)}','${esc(to)}')">
-        ${has ? '✓' : '+'} ${esc(from)}</button>`;
-    }).join('') || '<span class="hint">该插件没有预置模型，可手动添加映射</span>';
+      </div>`).join('') || '<span class="hint">还没有映射：点上面的「同步上游支持的模型」自动生成，或点下面的「添加映射」手填。</span>';
     act.mapSync();
   },
 
@@ -1039,13 +1019,6 @@ const act = {
   },
   mapAddRow() { state.map.maps.push({from: '', to: ''}); act.mapRender(); },
   mapDelRow(i) { state.map.maps.splice(i, 1); act.mapRender(); },
-  mapAddPreset(from, to) {
-    const s = state.map;
-    if (s.maps.some(m => m.from === from && m.to === to)) return act.mapDelRow(s.maps.findIndex(m => m.from === from && m.to === to));
-    s.maps.push({from, to});
-    act.mapRender();
-    toast('已添加映射 ' + from + ' → ' + to);
-  },
   mapAddCustom() {
     const v = ($('#mapCustom').value || '').trim();
     if (!v) return toast('先填模型名', true);
@@ -1056,15 +1029,6 @@ const act = {
     $('#mapCustom').value = '';
     act.mapRender();
     toast('已加入 ' + v);
-  },
-  mapSyncPreset() {
-    const s = state.map;
-    const keys = Object.keys((s.plugin && s.plugin.model_map) || {});
-    if (!keys.length) return toast('该插件没有预置模型', true);
-    let n = 0;
-    keys.forEach(k => { if (!s.allowed.some(x => x.toLowerCase() === k.toLowerCase())) { s.allowed.push(k); n++; } });
-    act.mapRender();
-    toast(n ? ('已加入 ' + n + ' 个预置模型') : '预置模型都在白名单里了');
   },
   async mapSyncUpstream(btn) {
     const key = ($('#fKey').value || '').trim();
