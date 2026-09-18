@@ -1472,7 +1472,7 @@ const act = {
       } else {
         b.push(`<button class="btn btn-sm btn-outline-secondary" onclick="act.pluginView('${esc(f.file)}')" title="内置插件只读"><i class="ti ti-eye"></i> 查看</button>`);
       }
-      return `<div class="d-flex flex-wrap gap-1">${b.join('')}</div>`;
+      return `<div class="ops-row">${b.join('')}</div>`;
     };
     $('#plugins').innerHTML = errHTML + (files.length ? table(
       ['插件', '来源', '状态', '支持操作', '参考图', '预置模型', '说明', '操作'],
@@ -1482,7 +1482,8 @@ const act = {
           + (f.load_error ? `<div class="hint">${esc(f.load_error)}</div>` : '')
           + (f.used_by && f.used_by.length ? `<div class="hint">实例：${esc(f.used_by.join('、'))}</div>` : ''),
         srcPill(f), stPill(f), opsHTML(f), refHTML(f), modelHTML(f),
-        `<span class="hint">${esc(f.hint || '')}</span>`, actsHTML(f)]))
+        `<span class="hint">${esc(f.hint || '')}</span>`, actsHTML(f)]),
+      { ccls: [null, null, null, null, null, null, null, 'ops-cell'] })
       + `<div class="p-3 hint">插件目录 <code>${esc(d.plugin_dir || '')}</code>：面板安装的插件落在这里（挂载卷，重建容器不丢）。
          新增一个渠道 = 装插件 → 去「渠道实例」新建实例选它；改完即时生效，不用重启容器。</div>`
       : emptyBox('没有插件', 'ti-puzzle'));
@@ -1496,7 +1497,13 @@ const act = {
         et.innerHTML = `<i class="ti ${encBad ? 'ti-shield-exclamation' : 'ti-shield-lock'}"></i> ${e.broken ? '密钥解不开 ' + e.broken : (e.plaintext ? '明文残留 ' + e.plaintext : '密钥已加密')}`;
         et.title = `加密来源：${e.source || '—'}｜已加密 ${e.encrypted || 0} 条｜明文 ${e.plaintext || 0}｜解不开 ${e.broken || 0}`;
       }
-      $('#pluginTag').innerHTML = (s.data.plugins || []).map(p => `<i class="ti ti-puzzle"></i> ${esc(p)}`).join(' · ');
+      // 左下角只显示数量：插件会越装越多，逐个列名字会把底栏撑爆（全名放 title，悬停可见）
+      const pn = s.data.plugins || [];
+      const pt = $('#pluginTag');
+      if (pt) {
+        pt.innerHTML = pn.length ? `<i class="ti ti-puzzle"></i> 插件 ${pn.length}` : '';
+        pt.title = pn.length ? `已装载插件 ${pn.length} 个：${pn.join('、')}` : '';
+      }
     }
   },
 

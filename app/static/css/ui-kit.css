@@ -910,3 +910,11 @@ table.tb.ih-tb td.ih-ep{font-family:var(--mono);font-size:var(--fs-xs);color:var
 table.tb.ih-tb .ih-note{display:block;color:var(--muted);font-size:var(--fs-xs);margin-top:2px}
 table.tb.ih-tb td.ih-act{white-space:nowrap;text-align:right}
 table.tb.ih-tb td.ih-act .btn{margin-left:var(--sp-1)}
+
+/* ==================== 渠道插件页「操作」列：按钮一律横向排列
+   用户反馈：插件行的操作按钮竖着排 —— 该列被前面几列的 chips 挤到 ~53px，
+   Bootstrap 的 flex-wrap 于是让每个按钮各占一行。做法：列宽按内容收缩 + 不换行，
+   容器固定 flex-direction:row（不换行，插件多按钮时也不会掉成竖排）。 */
+table.tb th.ops-cell{white-space:nowrap;width:1%}
+table.tb td.ops-cell{white-space:nowrap;width:1%}
+.ops-row{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--sp-1)}

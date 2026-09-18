@@ -108,6 +108,12 @@ def fetch_newapi(site: dict) -> dict:
 
 
 def fetch_sub2api(site: dict) -> dict:
+    """sub2api 系余额：GET {base}/v1/usage（Bearer）。
+
+    字段口径对齐飞书《站点余额查询代码接入》：
+      remaining = data.remaining ?? quota.remaining ?? data.balance
+      used      = quota.used ?? usage.total.cost
+    """
     base = (site.get("base_url") or "").rstrip("/")
     if not base:
         return {"error": "缺少 base_url"}
@@ -115,15 +121,27 @@ def fetch_sub2api(site: dict) -> dict:
     data = _json(r)
     if r.status_code != 200 or not isinstance(data, dict):
         return {"error": f"HTTP {r.status_code} {str(data or r.text)[:200]}", "raw": data}
-    remaining = data.get("remaining")
-    if remaining is None:
-        remaining = data.get("balance")
+    quota = data.get("quota") if isinstance(data.get("quota"), dict) else {}
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    total = usage.get("total") if isinstance(usage.get("total"), dict) else {}
+    remaining = data.get("remaining", quota.get("remaining", data.get("balance")))
     if remaining is None:
         return {"error": "响应里没有 remaining/balance 字段", "raw": data}
+    unit = data.get("unit") or quota.get("unit") or "USD"
     if data.get("isValid") is False or data.get("is_active") is False:
-        return {"error": "账户已失效", "balance": float(remaining), "unit": data.get("unit", "USD"), "raw": data}
-    return {"balance": float(remaining), "unit": data.get("unit") or "USD",
-            "plan": data.get("planName") or data.get("mode") or "", "raw": data}
+        return {"error": "账户已失效", "balance": float(remaining), "unit": unit, "raw": data}
+    used = quota.get("used", total.get("cost"))
+    extra = {}
+    if total.get("requests") is not None:
+        extra["请求数"] = total.get("requests")
+    if total.get("total_tokens") is not None:
+        extra["累计 tokens"] = total.get("total_tokens")
+    if quota.get("limit") is not None:
+        extra["额度上限"] = quota.get("limit")
+    return {"balance": float(remaining), "unit": unit,
+            "used": float(used) if isinstance(used, (int, float)) else None,
+            "plan": data.get("planName") or data.get("mode") or data.get("status") or "",
+            "extra_info": extra or None, "raw": data}
 
 
 def fetch_deepseek(site: dict) -> dict:

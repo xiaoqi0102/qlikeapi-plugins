@@ -1,3 +1,17 @@
+## [3.13.2] - 2026-09-18
+
+### 修复
+- **渠道插件页「操作」按钮竖排**（用户反馈）：该列被前面几列的 chips 挤到 ~53px，Bootstrap 的 `flex-wrap`
+  于是让每个按钮各占一行。现在操作列按内容收缩 + 不换行、容器固定 `flex-direction:row`，
+  编辑/停用/删除多个按钮也始终横排（与渠道实例页的操作列一致）。
+- **左下角状态栏把插件名一个个列出来**（用户反馈「插件会越装越多」）：改成只显示数量（`插件 5`），
+  全名收进悬停提示，插件再多也撑不爆底栏。
+- **change2pro 站点余额查询失败**：该站点记录 base_url 填的是站点主页 `change2pro.com`、key 为空，
+  而接口是 `https://api.change2pro.com/v1/usage`（`Authorization: Bearer`）。已修正该站点记录；
+  并按飞书《站点余额查询代码接入》补齐取数口径 —— `remaining = data.remaining ?? quota.remaining ?? data.balance`、
+  `used = quota.used ?? usage.total.cost`，同时带上「请求数 / 累计 tokens / 额度上限」明细，
+  sub2api 系站点（sixoner / kaola / cch 等）现在也能显示「已用」。
+
 ## [3.13.1] - 2026-09-18
 
 ### 修复
