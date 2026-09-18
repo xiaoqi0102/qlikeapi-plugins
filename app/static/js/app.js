@@ -1467,7 +1467,7 @@ const act = {
         b.push(f.enabled
           ? `<button class="btn btn-sm btn-outline-secondary" onclick="act.pluginToggle('${esc(f.file)}',false)" title="停用后不再装载，可随时启用"><i class="ti ti-player-pause"></i> 停用</button>`
           : `<button class="btn btn-sm btn-outline-secondary" onclick="act.pluginToggle('${esc(f.file)}',true)"><i class="ti ti-player-play"></i> 启用</button>`);
-        b.push(`<button class="btn btn-sm btn-outline-danger" onclick="act.pluginDelete('${esc(f.file)}')" title="删除插件文件"><i class="ti ti-trash"></i></button>`);
+        b.push(`<button class="btn btn-sm btn-outline-danger" onclick="act.pluginDelete('${esc(f.file)}')" title="删除插件文件"><i class="ti ti-trash"></i> 删除</button>`);
       } else {
         b.push(`<button class="btn btn-sm btn-outline-secondary" onclick="act.pluginView('${esc(f.file)}')" title="内置插件只读"><i class="ti ti-eye"></i> 查看</button>`);
       }
