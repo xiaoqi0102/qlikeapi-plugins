@@ -128,6 +128,15 @@ const MODE = {native:['info','原生透传'], converted:['warn','本服务翻译
 const pill = UI.pill;
 const ratePill = (rate, n) => n ? pill(rate >= 99 ? 'ok' : rate >= 90 ? 'warn' : 'err', rate + '%') : '<span class="pill">—</span>';
 const emptyBox = UI.empty;
+// 参考图形态：按插件声明的口径显示（合并插件按「面」分别显示）
+const refChip = (c) => {
+  const faces = c.ref_input_faces || {};
+  if (Object.keys(faces).length)
+    return Object.entries(faces).map(([k, v]) =>
+      `<span class="chip mono" title="${esc(c.ref_input_note || '')}">${esc(k)} ${esc(v)}</span>`).join(' ');
+  const v = c.ref_input || 'base64';
+  return `<span class="chip mono" title="${esc(c.ref_input_note || '')}">${esc(v)}</span>`;
+};
 
 /* ================================================================= 动作 */
 const act = {
@@ -772,6 +781,7 @@ const act = {
         <b>${esc(c.label)}</b> <span class="chip mono">${esc(c.id)}</span>${c.vendor ? `<span class="pill">${esc(c.vendor)}</span>` : ''}
         ${c.docs ? `<a class="btn btn-sm btn-outline-secondary" href="${esc(c.docs)}" target="_blank" rel="noopener"><i class="ti ti-external-link"></i> 官方文档</a>` : ''}
         <span class="hint">${ops}</span></div>
+      <div class="hint mt-1">参考图：${refChip(c)} <span class="hint">${esc(c.ref_input_note || '')}</span></div>
       <div class="hint mt-1">${esc(c.hint || '')}</div>
       ${c.note ? `<div class="hint">⚠ ${esc(c.note)}</div>` : ''}`;
   },
@@ -1388,10 +1398,11 @@ const act = {
     const errHTML = Object.keys(errs).length
       ? `<div class="p-3">${Object.entries(errs).map(([k, v]) => pill('err', `插件 ${k} 装载失败：${v}`)).join(' ')}</div>` : '';
     $('#plugins').innerHTML = errHTML + (state.plugins.length ? table(
-      ['插件 id','名称','支持操作','默认鉴权','预置模型','说明'],
+      ['插件 id','名称','支持操作','默认鉴权','参考图','预置模型','说明'],
       state.plugins.map(c => [`<span class="mono">${esc(c.id)}</span>`, esc(c.label),
         c.operations.map(o => `<span class="chip">${o.operation} ${o.mode}</span>`).join(' '),
         `<span class="chip mono">${esc(c.default_auth)}</span>`,
+        refChip(c),
         (c.models||[]).map(m => `<span class="chip mono">${esc(m)}</span>`).join(' ') || '—',
         `<span class="hint">${esc(c.hint)}</span>`]))
       + `<div class="p-3 hint">新增渠道 = 复制 <code>app/channels/_template.py</code> 改名、实现 <code>build()</code>，然后点「重载插件」即时生效，不用重启容器。</div>`

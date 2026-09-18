@@ -149,3 +149,17 @@ def test_unsupported_operation_mode():
     """不支持的操作要能提前看出来（由 relay 直接 400，不打上游）。"""
     ch = channels.get("gemini_native")
     assert ch.route_mode("什么鬼") == "unsupported"
+
+
+def test_every_channel_declares_ref_input(db):
+    """每个插件都必须按官方文档声明参考图形态，且值合法（面板/日志都靠它）。"""
+    from app import channels
+    for cid in channels.available_ids():
+        info = channels.get(cid).info()
+        assert info["ref_input"] in ("url", "both", "base64"), cid
+        for face, v in (info["ref_input_faces"] or {}).items():
+            assert v in ("url", "both", "base64"), (cid, face)
+        assert info["ref_input_note"], cid              # 面板要给人话说明
+    assert channels.get("qiniu_fal").info()["ref_input"] == "url"
+    assert channels.get("gemini_native").info()["ref_input"] == "base64"
+    assert channels.get("qiniu").info()["ref_input_faces"] == {"异步面": "url", "同步面": "base64"}

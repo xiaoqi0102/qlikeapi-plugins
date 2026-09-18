@@ -39,6 +39,8 @@ class Channel:
     #   both   两种都支持 → 优先公网 URL，图床不可用时回落 base64 内联（不因此失败）
     #   base64 只认 base64（如 Gemini 的 inlineData）→ 原样透传，不做任何转换
     ref_input: str = "base64"
+    # 合并插件用：按「面」分别声明形态（面板会展示成「异步面 url / 同步面 base64」）
+    ref_input_faces: dict[str, str] = {}
 
     # ---- 行为（子类实现） ----
     def build(self, p: dict, body: dict, edit: bool) -> tuple[str, dict, dict]:
@@ -80,6 +82,7 @@ class Channel:
                 "default_base_url": self.default_base_url,
                 "operations": [{"operation": op, "mode": mode} for op, mode in self.operations.items()],
                 "ref_input": self.ref_input,
+                "ref_input_faces": dict(self.ref_input_faces),
                 "ref_input_note": {"url": "只认公网 URL（参考图会自动转图床直链）",
                                    "both": "URL / base64 都支持（优先公网 URL）",
                                    "base64": "只认 base64（参考图原样透传）"}.get(self.ref_input, ""),

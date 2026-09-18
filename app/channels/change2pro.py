@@ -31,6 +31,7 @@ class Change2Pro(Channel):
         "gpt-image-2": "gpt-image-2",
     }
 
+    ref_input_faces = {"gemini 面": "base64", "image2 面": "both"}
     def declared_ref_input(self, p: dict, body: dict, edit: bool) -> str:
         """gemini 面走 inlineData（只吃 base64）；image2 面是 OpenAI 形状（两者都行）。"""
         up_model = protocols.upstream_model(p, body.get("model") or "")
