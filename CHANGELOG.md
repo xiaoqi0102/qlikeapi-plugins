@@ -1,3 +1,21 @@
+## v3.14.1 — 数字字段规范化（修「客户端把 n 发成字符串导致上游 400」）
+
+**现象**：出图失败，上游回
+`invalid request body: json: cannot unmarshal string into Go struct field RelayImageEditForm.n of type int`。
+
+**根因**：客户端（可视化工作流工具常见）把 `n` 序列化成字符串 `"1"`，而翻译层对客户端字段是**原样透传**（只做字段删除，不做类型规范化）；
+七牛 / sub2api / new-api 这类 Go 上游用强类型结构体接参，字符串直接 400。
+
+**修复**：翻译层新增数字字段规范化（`utils.coerce_numeric_fields` / `utils.to_int`），
+只对白名单里的数字字段（`n` / `seed` / `steps` / `width` / `height` / `output_compression` / `temperature` / `top_p` …）
+做「看起来是数字就转成真数字」，**非数字串（`"auto"` / `"1024x1152"` / `""`）原样保留**，尺寸与枚举字段不受影响。
+- `build_openai_images`（generations + edits，覆盖 qnaigc / change2pro / aicost / 任意自定义插件）
+- `build_fal_queue`（顺带修掉 `int(body["n"])` 遇到 `"auto"` 抛 500 的老坑）
+
+**测试**：新增 3 条用例（字符串数字被规范化 / 非数字串不动 / fal 面字符串与非法值都安全）。
+
+**顺带**：新增 `POST /up/{provider}/v1/images/edits/preview` —— 改图面（带参考图）的 dry-run，只回「将要发给上游的请求」不发出去（这类问题就是靠它零成本看到真实报文）。
+
 ## [3.14.0] - 2026-09-18
 
 ### 新增

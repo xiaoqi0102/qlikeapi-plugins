@@ -389,3 +389,49 @@ def mask(secret: str | None, keep: int = 6) -> str:
     if len(s) <= keep + 4:
         return (s[:2] + "…") if s else ""
     return f"{s[:keep]}…{s[-4:]}"
+
+# ------------------------------------------------------------------ 数字字段规范化
+
+# 客户端（尤其是可视化工作流工具）常把数字字段当字符串发：{"n": "1", "seed": "42"}。
+# 多数 Go 系上游（七牛 / sub2api / new-api）用强类型结构体接参，字符串会直接 400：
+#   invalid request body: json: cannot unmarshal string into Go struct field RelayImageEditForm.n of type int
+# 这里只对「白名单里的数字字段」做「看起来是数字就转成数字」，其余（"auto" / "1024x1024" / ""）原样保留。
+_INT_FIELDS = ("n", "seed", "steps", "num_images", "batch_size", "width", "height",
+               "output_compression", "num_inference_steps", "top_k")
+_FLOAT_FIELDS = ("temperature", "top_p", "guidance_scale", "strength", "scale", "cfg_scale")
+
+
+def to_int(v):
+    """能当整数就当整数（"1" / "1.0" / 1 → 1），否则 None。"""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return int(v) if float(v).is_integer() else None
+    if isinstance(v, str) and v.strip():
+        try:
+            f = float(v)
+        except ValueError:
+            return None
+        return int(f) if f.is_integer() else None
+    return None
+
+
+def coerce_numeric_fields(body: dict, int_keys=_INT_FIELDS, float_keys=_FLOAT_FIELDS) -> dict:
+    """返回规范化后的新 dict：字符串形式的数字 → 真正的数字；非数字/空值原样留着。"""
+    out = dict(body)
+    for k in int_keys:
+        v = out.get(k)
+        if isinstance(v, str):
+            iv = to_int(v)
+            if iv is not None:
+                out[k] = iv
+    for k in float_keys:
+        v = out.get(k)
+        if isinstance(v, str) and v.strip():
+            try:
+                out[k] = float(v)
+            except ValueError:
+                pass
+    return out

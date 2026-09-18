@@ -506,6 +506,8 @@ def build_openai_images(p: dict, body: dict, edit: bool = False) -> tuple[str, d
     up = {k: v for k, v in body.items() if k not in drop and v is not None}
     up["model"] = up_model
     removed = apply_removals(up, [f for f in flat if "." in f or "*" in f] + nested)
+    # 数字字段规范化：客户端把 "n"/"seed" 发成字符串时，Go 系上游会 400（见 utils.coerce_numeric_fields）
+    up = utils.coerce_numeric_fields(up)
     size_meta: dict = {}
     if up.get("size"):
         dec = utils.snap_size(up["size"], up_model, size_mode(p))
@@ -567,8 +569,9 @@ def build_fal_queue(p: dict, body: dict, edit: bool = False) -> tuple[str, dict,
         q = utils.normalize_quality(body.get("quality"))
         if q:
             up["quality"] = q
-        if body.get("n"):
-            up["num_images"] = max(1, min(int(body["n"]), 4))
+        n = utils.to_int(body.get("n"))       # "auto"/"1" 都能安全处理，不再 int("auto") 抛 500
+        if n:
+            up["num_images"] = max(1, min(n, 4))
         for f in ("background", "output_compression", "output_format"):
             if body.get(f) not in (None, ""):
                 up[f] = body[f]
@@ -577,6 +580,7 @@ def build_fal_queue(p: dict, body: dict, edit: bool = False) -> tuple[str, dict,
             if body.get(f) not in (None, ""):
                 up[f] = str(body[f]) if f == "safety_tolerance" else body[f]
     base = p["base_url"].rstrip("/")
+    up = utils.coerce_numeric_fields(up)      # output_compression 等数字字段同样规范化
     return base + submit_path, up, {"up_model": up_model, "poll_base": base + poll_base, **size_meta}
 
 

@@ -158,6 +158,20 @@ def test_preview_endpoint_shows_upstream_body_without_sending(client, make_provi
     assert no_upstream == []
 
 
+def test_edits_preview_shows_edit_url_and_coerced_numbers(client, make_provider, no_upstream):
+    """改图面的 dry-run：URL 走 edits，且字符串数字已被规范化（Go 上游要 int）。"""
+    make_provider(key="p1")
+    r = client.post("/up/p1/v1/images/edits/preview",
+                    json={"model": "gpt-image-2", "prompt": "换装", "n": "1", "seed": "42"},
+                    headers=MASTER)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["dry_run"] is True and body["url"].endswith("/v1/images/edits")
+    assert body["upstream_body"]["n"] == 1 and isinstance(body["upstream_body"]["n"], int)
+    assert body["upstream_body"]["seed"] == 42
+    assert no_upstream == []
+
+
 def test_models_endpoint_lists_configured_models(client, make_provider):
     make_provider(key="p1", model_map={"alias-model": "openai/real"})
     r = client.get("/v1/models", headers=MASTER)

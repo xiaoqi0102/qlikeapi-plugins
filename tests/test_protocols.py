@@ -183,6 +183,39 @@ def test_build_openai_images_requires_prompt():
         protocols.build_openai_images(GEMINI_P, {"model": "gpt-image-2", "prompt": "   "})
 
 
+def test_string_numbers_coerced_to_numbers():
+    """客户端把数字字段发成字符串时（可视化工作流工具常见）要转成真数字 ——
+    七牛 / sub2api / new-api 这类 Go 上游是强类型结构体，收到字符串直接 400：
+    invalid request body: json: cannot unmarshal string into Go struct field RelayImageEditForm.n of type int
+    """
+    body = {"model": "gpt-image-2", "prompt": "换装", "n": "1", "seed": "42",
+            "size": "2048x1152", "quality": "high", "output_compression": "80",
+            "temperature": "0.8", "background": "auto"}
+    _, up, _ = protocols.build_openai_images(GEMINI_P, body)
+    assert up["n"] == 1 and isinstance(up["n"], int)
+    assert up["seed"] == 42 and isinstance(up["seed"], int)
+    assert up["output_compression"] == 80
+    assert up["temperature"] == 0.8
+    assert up["size"] == "2048x1152"                    # 尺寸串不能动
+    assert up["quality"] == "high" and up["background"] == "auto"   # 非数字串原样
+    assert isinstance(body["n"], str)                   # 不改调用方的入参
+
+
+def test_non_numeric_numbers_left_alone():
+    _, up, _ = protocols.build_openai_images(
+        GEMINI_P, {"model": "gpt-image-2", "prompt": "x", "n": "auto", "seed": "", "steps": "many"})
+    assert up["n"] == "auto" and up["seed"] == "" and up["steps"] == "many"
+
+
+def test_fal_queue_tolerates_string_n():
+    """fal 面原来 int(body["n"]) 遇到 "1" 侥幸能过、"auto" 直接抛 500；现在两者都安全。"""
+    _, up, _ = protocols.build_fal_queue(
+        FAL_P, {"model": "gpt-image-2", "prompt": "x", "n": "2", "output_compression": "70"})
+    assert up["num_images"] == 2 and up["output_compression"] == 70
+    _, up2, _ = protocols.build_fal_queue(FAL_P, {"model": "gpt-image-2", "prompt": "x", "n": "auto"})
+    assert "num_images" not in up2
+
+
 def test_build_openai_images_edit_path_and_force_fields():
     p = dict(GEMINI_P, options={"edits_path": "/images/edits", "force_fields": {"response_format": "url"}})
     url, up, _ = protocols.build_openai_images(p, {"model": "gpt-image-2", "prompt": "改图"}, edit=True)

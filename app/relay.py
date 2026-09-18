@@ -792,6 +792,13 @@ def up_preview(provider: str, request: Request):
     return _handle(provider, request, edit=False, dry=True)
 
 
+@router.post("/{provider}/v1/images/edits/preview")
+def up_edits_preview(provider: str, request: Request):
+    """改图面（带参考图）的 dry-run：只回「将要发给上游的请求」，不发出去。
+    修「客户端把 n 发成字符串」那类问题时，就是靠它零成本看到真实报文。"""
+    return _handle(provider, request, edit=True, dry=True)
+
+
 @router.post("/{provider}/v1/images/selftest")
 def up_selftest(provider: str, request: Request, model: str | None = None):
     return _handle(provider, request, edit=False, probe=True)
