@@ -87,6 +87,24 @@
 
 ## 快速开始
 
+### 方式一：直接拉现成镜像（最快，不想改代码就用这个）
+
+```bash
+docker run -d --name qlikeapi-plugins -p 127.0.0.1:18673:18673 \
+  -e QLIKEAPI_SECRET=$(openssl rand -hex 24) \
+  -e QLIKEAPI_UP_TOKEN=$(openssl rand -hex 24) \
+  -e QLIKEAPI_ADMIN_USER=admin \
+  -e QLIKEAPI_ADMIN_PASS=换成你自己的强密码 \
+  -v /opt/qlikeapi-plugins/data:/data \
+  ghcr.io/xiaoqi0102/qlikeapi-plugins:latest
+```
+
+> 镜像由 GitHub Actions 在打 `v*` 标签时自动构建并推送（`latest` / `3.15.2` / `3.15` / `v3.15.2` / `sha-xxxx`），
+> 推送前会拉回来跑一遍冒烟。GHCR 包默认是**私有**的，拉取前先 `docker login ghcr.io`
+> （密码用带 `read:packages` 的 PAT），或在包设置里把可见性改成 Public 后匿名拉取。
+
+### 方式二：从源码构建（要改代码 / 自己加渠道插件就用这个）
+
 ```bash
 git clone https://github.com/xiaoqi0102/qlikeapi-plugins.git
 cd qlikeapi-plugins
@@ -278,6 +296,7 @@ make test && make lint
 | [docs/SIZE-MAPPING.md](docs/SIZE-MAPPING.md) | **尺寸换算规则**：客户端像素 → 上游实际尺寸（GPT 自由尺寸四条硬限制、Gemini 档位×比例像素表，均附官方出处） |
 | [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) | UI 设计规范：设计变量、组件库清单、交互约定、变更流程与坑清单 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 已做 / 计划 / **明确不做**（含理由） |
+| [docs/ARCHIVE.md](docs/ARCHIVE.md) | **首次归档记录**：归档点的版本、产物位置、恢复方式与验收证据 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
 
 ---

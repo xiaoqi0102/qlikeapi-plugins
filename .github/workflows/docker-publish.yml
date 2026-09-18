@@ -35,10 +35,15 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
+            # 打 v* 标签自动触发时：从标签名推导 3.15.1 / 3.15 / v3.15.1 / latest
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=ref,event=tag
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            # 手动补推（workflow_dispatch 传 version=v3.15.1）时：同样推导出 3.15.1 / 3.15 / latest
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=latest,enable=${{ inputs.version != '' }}
             type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
             type=sha,prefix=sha-,format=short
           labels: |
