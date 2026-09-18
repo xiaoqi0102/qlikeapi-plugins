@@ -3,7 +3,22 @@
 > 一个渠道插件 = **一个上游协议的实现**。
 > 加一个新上游，只动 `app/channels/` 下的一个文件，核心代码一行都不用改。
 
-## 1. 三分钟上手
+## 0. 三条路（先看这个）
+
+| 路 | 怎么做 | 适合 |
+|---|---|---|
+| **面板装（推荐）** | 控制台 →「渠道插件」→ **添加插件** → 贴代码 → **校验** → 校验并安装 | 有现成代码 / AI 生成的插件 |
+| **AI 写** | 「渠道插件 → 给 AI 的说明」复制全文（= [`PLUGIN-AUTHORING.md`](PLUGIN-AUTHORING.md)），连同上游接口文档发给 AI | 手上只有中转站的接口文档 |
+| **进服务器放文件** | 下面的 `cp _template.py` 流程（需要 `make test` + 重建镜像） | 开发内置插件 / 长期维护 |
+
+面板装的两个要点：
+
+- 落盘在 `QLIKEAPI_PLUGIN_DIR`（默认 `/data/plugins`，**挂载卷 → 重建容器不丢**）；保存即热重载，不用重启容器。
+- 安装前自动校验（语法 / 结构 / 危险写法 / 真装一次 / 元信息完整性），报告带行号。
+  ⚠ 静态校验**不是沙箱** —— 插件是可执行代码，只装可信来源。
+- 内置插件（`app/channels/*.py`）在面板里**只读**：要改就另存为新文件名 + 换 `id`。
+
+## 1. 三分钟上手（开发内置插件）
 
 ```bash
 cp app/channels/_template.py app/channels/my_relay.py
@@ -248,3 +263,5 @@ def test_example_draw_translates_fields():
 | 在 `build()` 里直接 `httpx.post` | 没有超时/没有统一日志/测试打桩失效 | 只允许 `protocols.call_upstream()` |
 | 新增提示词字段但没进 `_PROBE_BLANK` 类似逻辑 | 探活又开始真出图 | 确认 `relay.blank_for_probe()` 的递归覆盖，并补 `tests/test_probe.py` 用例 |
 | 插件写错导致整个渠道不可用 | 控制台看不到该插件 | 看「设置」页的插件错误列表（`channels.ERRORS`），修好后点「重载插件」 |
+| 面板装的插件重启后没了 | 装到了容器里而不是卷上 | 确认 `QLIKEAPI_PLUGIN_DIR` 指向挂载卷（默认 `/data/plugins` → 宿主 `./data/plugins`） |
+| 覆盖安装后行为没变 | 老模块还在内存里 | v3.13.0 已修（`channels.load_path` 每次重建 spec）；旧版本请点「重载插件」或重启容器 |

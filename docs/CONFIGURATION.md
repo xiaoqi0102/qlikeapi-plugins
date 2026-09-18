@@ -17,6 +17,7 @@
 | `QLIKEAPI_ENC_KEY` | 空 | 单独的加密主密钥（不填则用 `QLIKEAPI_SECRET` 派生）。想轮换会话密钥又不想重填渠道密钥时用它 |
 | `QLIKEAPI_ADMIN_USER` | `admin` | 控制台账号。**只在首次启动建库时生效**，之后改这里无效 |
 | `QLIKEAPI_ADMIN_PASS` | 空 | 控制台密码。留空＝首次启动随机生成并打印到容器日志（推荐用 `openssl rand -hex 24` 显式设置） |
+| `QLIKEAPI_PLUGIN_DIR` | `/data/plugins` | **面板上传的渠道插件目录**。挂在卷上（重建容器不丢）；改这里就换了「添加插件」的落盘位置 |
 | `QLIKEAPI_DB` | `/data/qlikeapi.db` | SQLite 文件路径（容器内），配合 `./data:/data` 卷持久化 |
 | `QLIKEAPI_SECURE_COOKIE` | `1` | Cookie 加 `Secure`。HTTPS 反代下保持 1；纯 http 内网调试设 0 |
 | `QLIKEAPI_SESSION_DAYS` | `30` | 控制台登录态有效天数 |

@@ -140,6 +140,14 @@ curl -s -X POST "http://127.0.0.1:18673/up/change2pro/v1/images/preview" \
 |---|---|---|
 | GET | `/api/channels` | 已装载的渠道插件（含 `operations`、`models` 预置模型清单、`model_map` 预置映射） |
 | POST | `/api/channels/reload` | 热重载插件目录（加插件后不用重启） |
+| GET | `/api/plugins` | 插件文件列表（含来源 / 状态 / 参考图口径 / 被哪些实例在用 / 装载报错）+ 插件目录 |
+| POST | `/api/plugins/validate` | **只校验不落盘**：`{file, source}` → 报告（错误带行号 / 提醒 / 通过项 / 解析出的 info） |
+| POST | `/api/plugins/save` | 校验并安装：`{file, source, overwrite?}`；已存在且没给 `overwrite` 时返回 `need_overwrite` |
+| GET | `/api/plugins` `?file=` | 读某个插件的源码（内置的可读不可写） |
+| DELETE | `/api/plugins` `?file=` | 删除插件（还有渠道实例在用时拒绝） |
+| POST | `/api/plugins/toggle` | 启用 / 停用：`{file, enabled}`（停用 = 文件改名 `.py.disabled`，不装载） |
+| GET | `/api/plugins/template` | 插件模板 `_template.py` 全文 |
+| GET | `/api/plugins/authoring-doc` | 给 AI 的插件编写说明全文（面板一键复制） |
 | GET | `/api/providers` | 渠道实例列表（密钥只回 `{"index","masked","label"}`；另带 `key_groups` 分组汇总：标签/把数/已知模型） |
 | POST | `/api/providers` | 新建/更新实例（密钥加密入库；`model_map` 会校验通配符格式与右侧禁用 `*`，非法 → 400） |
 | POST | `/api/providers/{key}/patch` | 轻量改：`enabled` / `priority` / `weight`（即时生效） |

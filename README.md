@@ -42,7 +42,7 @@
 | 能力 | 说明 |
 |---|---|
 | **统一入口** | `POST /v1/images/generations`、`POST /v1/images/edits`，标准 OpenAI 图片形状返回 |
-| **渠道插件化** | 一个上游协议 = 一个插件文件（`app/channels/*.py`），照模板复制即可加新渠道 |
+| **渠道插件化** | 一个上游协议 = 一个插件文件；**面板里直接加 / 改 / 删插件**（安装前自动校验），或用 AI 按说明书生成插件 |
 | **多渠道路由** | 同一模型可挂多个渠道实例：优先级排序 + 权重分流 + 显式路由链（控制台可视化编辑） |
 | **故障切换** | `429 / 402 / 5xx / 连接失败` → 换下一家；**400 参数错立即返回**（不重复打）；**超时默认不切换**（防重复扣费） |
 | **自动熔断** | 连续失败到阈值自动停用；冷却到期后必须**探活通过**才放回路由（人工停用的永不被自动恢复） |
@@ -209,6 +209,24 @@ make backup        # 备份 SQLite
 
 ## 写一个新渠道插件
 
+**方式一：面板里加（推荐，不用进服务器）**
+
+```
+控制台 →「渠道插件」→ 添加插件 → 贴代码 → 校验 → 校验并安装 → 「渠道实例」新建实例选它
+```
+
+上传的插件落在 `QLIKEAPI_PLUGIN_DIR`（默认 `/data/plugins`，挂载卷 → 重建容器不丢），
+保存即热重载。安装前会自动校验：语法 → 结构 → 危险写法（进程/网络/文件/反射逃逸）→
+真装一次（子进程、剥掉密钥、带超时）→ 元信息完整性；报告按「错误（带行号）/ 提醒 / 通过项」分级。
+⚠ 静态校验**不是沙箱**：插件是可执行代码，只装可信来源。
+
+**方式二：让 AI 写**
+
+点「渠道插件 → 给 AI 的说明」，复制全文（同 [`docs/PLUGIN-AUTHORING.md`](docs/PLUGIN-AUTHORING.md)），
+把中转站的接口文档附在后面发给 AI，产出的 `.py` 贴回「添加插件」校验安装即可。
+
+**方式三：进服务器放文件**
+
 ```bash
 cp app/channels/_template.py app/channels/my_relay.py
 # 填 CHANNEL 元信息 + 实现 build()（把标准请求翻译成上游要的样子）
@@ -251,6 +269,7 @@ make test && make lint
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 分层、请求生命周期、数据模型、熔断状态机、设计取舍 |
 | [docs/CHANNEL-PLUGINS.md](docs/CHANNEL-PLUGINS.md) | 渠道插件契约与开发指南（含完整示例） |
+| [docs/PLUGIN-AUTHORING.md](docs/PLUGIN-AUTHORING.md) | **渠道插件编写说明**：可直接发给 AI 的完整契约（面板可一键复制） |
 | [docs/API.md](docs/API.md) | HTTP 接口手册（统一入口 / 控制台 API / 错误码） |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | 全部环境变量、令牌、价格与余额取数配置 |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker 部署、反代、接入 New API、备份升级回滚 |

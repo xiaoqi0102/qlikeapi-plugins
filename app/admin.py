@@ -15,7 +15,7 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from . import balances, channels, crypto, imagehost, protocols, relay, store, utils
+from . import balances, channels, crypto, imagehost, plugindoc, pluginstore, protocols, relay, store, utils
 
 router = APIRouter(prefix="/api")
 
@@ -137,6 +137,101 @@ def api_channels_reload(request: Request):
         return err
     channels.discover(reload=True)
     return {"ok": True, "loaded": channels.available_ids(), "errors": channels.ERRORS}
+
+
+# ------------------------------------------------------------------ 插件管理（面板里增删改）
+
+@router.get("/plugins")
+def api_plugins(request: Request):
+    """插件文件清单：内置（只读）+ 上传的（可编辑/停用/删除）+ 装载失败原因。"""
+    u, err = need_user(request)
+    if err:
+        return err
+    return {"ok": True, "files": pluginstore.list_files(), "errors": channels.ERRORS,
+            "plugin_dir": str(pluginstore.plugin_dir()), "loaded": channels.available_ids()}
+
+
+@router.get("/plugins/template")
+def api_plugins_template(request: Request):
+    """插件模板源码（面板「插入模板」用）。"""
+    u, err = need_user(request)
+    if err:
+        return err
+    return {"ok": True, "file": "_template.py", "source": pluginstore.template()}
+
+
+@router.get("/plugins/authoring-doc")
+def api_plugins_authoring_doc(request: Request):
+    """给 AI 的插件编写说明全文（面板「给 AI 的说明」里一键复制）。"""
+    u, err = need_user(request)
+    if err:
+        return err
+    return {"ok": True, "doc": plugindoc.AUTHORING_DOC}
+
+
+@router.get("/plugins/source")
+def api_plugins_source(request: Request, file: str = ""):
+    """读某个插件的源码（内置的只读查看，上传的可编辑）。"""
+    u, err = need_user(request)
+    if err:
+        return err
+    try:
+        return {"ok": True, **pluginstore.read(file)}
+    except (ValueError, FileNotFoundError) as e:
+        return JSONResponse({"error": f"读不到 {file}：{e}"}, status_code=404)
+
+
+@router.post("/plugins/validate")
+async def api_plugins_validate(request: Request):
+    """只校验不落盘：语法 / 危险写法 / 结构 / 真装载 / 元信息。"""
+    u, err = need_user(request)
+    if err:
+        return err
+    d = await request.json()
+    rep = pluginstore.validate(str(d.get("source") or ""), str(d.get("file") or ""))
+    return {"ok": rep["ok"], "report": rep}
+
+
+@router.post("/plugins/save")
+async def api_plugins_save(request: Request):
+    """校验通过才落盘 + 热重载。overwrite=false 时同名文件已存在会要求确认。"""
+    u, err = need_user(request)
+    if err:
+        return err
+    d = await request.json()
+    try:
+        r = pluginstore.save(str(d.get("file") or ""), str(d.get("source") or ""),
+                             overwrite=bool(d.get("overwrite")))
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse(r, status_code=200 if r.get("ok") else 400)
+
+
+@router.post("/plugins/toggle")
+async def api_plugins_toggle(request: Request):
+    """停用 / 启用上传的插件（停用 = 改名成 .py.disabled，加载器自然不装它）。"""
+    u, err = need_user(request)
+    if err:
+        return err
+    d = await request.json()
+    try:
+        r = pluginstore.set_enabled(str(d.get("file") or ""), bool(d.get("enabled")))
+    except (ValueError, FileNotFoundError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return r
+
+
+@router.delete("/plugins")
+def api_plugins_delete(request: Request, file: str = ""):
+    """删除上传的插件。还有渠道实例在用 → 拒绝（先改实例，别把在跑的渠道打挂）。"""
+    u, err = need_user(request)
+    if err:
+        return err
+    try:
+        r = pluginstore.delete(file)
+    except (ValueError, FileNotFoundError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return r
 
 
 # ------------------------------------------------------------------ 渠道实例

@@ -138,6 +138,42 @@ const refChip = (c) => {
   return `<span class="chip mono" title="${esc(c.ref_input_note || '')}">${esc(v)}</span>`;
 };
 
+/* ---------------- 渠道插件编辑器（CodeMirror，本地自托管 /static/vendor/codemirror） ---------------- */
+let _cm = null;
+const cmTheme = () => (document.body.classList.contains('dark') ? 'material-darker' : 'eclipse');
+function cmOpen(value) {
+  const host = $('#pgEditor');
+  _cm = null;
+  host.innerHTML = '';
+  if (!window.CodeMirror) {                       // 兜底：组件没加载出来也还能编辑
+    host.innerHTML = '<textarea id="pgTa" class="pg-src" spellcheck="false"></textarea>';
+    $('#pgTa').value = value;
+    return;
+  }
+  _cm = window.CodeMirror(host, {value, mode: 'python', theme: cmTheme(), lineNumbers: true, indentUnit: 2,
+    tabSize: 2, lineWrapping: true, matchBrackets: true, autoCloseBrackets: true});
+  setTimeout(() => _cm && _cm.refresh(), 90);      // 弹窗动画结束后再量高度，否则行号列错位
+}
+const cmValue = () => (_cm ? _cm.getValue() : (($('#pgTa') || {}).value || ''));
+const cmSet = (v) => (_cm ? _cm.setValue(v) : ($('#pgTa') && ($('#pgTa').value = v)));
+
+/** 校验报告：错误（红）→ 提醒（黄）→ 通过项（绿） */
+function renderPluginReport(rep) {
+  const box = $('#pgReport'), hint = $('#pgHint');
+  if (!rep) { box.innerHTML = ''; hint.innerHTML = ''; return; }
+  const E = rep.errors || [], W = rep.warnings || [], C = rep.checks || [];
+  const row = (cls, icon, msg, line) => `<div class="r ${cls}"><i class="ti ti-${icon}"></i><span>${esc(msg)}</span>`
+    + (line ? `<span class="ln">第 ${line} 行</span>` : '') + '</div>';
+  box.innerHTML = E.map(e => row('e', 'alert-triangle', e.msg, e.line)).join('')
+    + W.map(w => row('w', 'alert-circle', w.msg, w.line)).join('')
+    + (E.length ? '' : C.map(c => row('o', 'circle-check', `${c.name}：${c.detail || '通过'}`)).join(''));
+  const id = (rep.info && rep.info.id) || '';
+  hint.innerHTML = E.length
+    ? `<span class="pill err">${E.length} 处问题</span> 改完再点一次「校验」`
+    : `<span class="pill ok">校验通过</span>${id ? ` · 插件 id <span class="mono">${esc(id)}</span>` : ''}`
+      + (W.length ? ` · ${W.length} 条提醒` : '');
+}
+
 /* ================================================================= 动作 */
 const act = {
   closeModal,
@@ -1402,50 +1438,199 @@ const act = {
 
   /* -------------------- 渠道插件 -------------------- */
   async loadPlugins() {
-    const r = await api('/api/channels');
+    const r = await api('/api/plugins');
     if (!r) return;
-    state.plugins = r.data.channels || [];
-    const errs = r.data.errors || {};
+    const d = r.data || {}, files = d.files || [], errs = d.errors || {};
+    state.pluginFiles = files;                        // 全部文件（含停用/装载失败）
+    state.plugins = files.filter(f => f.loaded && f.enabled);   // 能选的插件（渠道实例弹窗用）
     const errHTML = Object.keys(errs).length
       ? `<div class="p-3">${Object.entries(errs).map(([k, v]) => pill('err', `插件 ${k} 装载失败：${v}`)).join(' ')}</div>` : '';
-    $('#plugins').innerHTML = errHTML + (state.plugins.length ? table(
-      ['插件 id','名称','支持操作','默认鉴权','参考图','预置模型','说明'],
-      state.plugins.map(c => [`<span class="mono">${esc(c.id)}</span>`, esc(c.label),
-        c.operations.map(o => `<span class="chip">${o.operation} ${o.mode}</span>`).join(' '),
-        `<span class="chip mono">${esc(c.default_auth)}</span>`,
-        refChip(c),
-        (c.models||[]).map(m => `<span class="chip mono">${esc(m)}</span>`).join(' ') || '—',
-        `<span class="hint">${esc(c.hint)}</span>`]))
-      + `<div class="p-3 hint">新增渠道 = 复制 <code>app/channels/_template.py</code> 改名、实现 <code>build()</code>，然后点「重载插件」即时生效，不用重启容器。</div>`
-      : emptyBox('没有装载到任何插件，检查 app/channels/ 目录', 'ti-puzzle'));
+    const srcPill = (f) => (f.builtin ? pill('', '内置') : pill('info', '上传'));
+    const stPill = (f) => (!f.enabled ? pill('warn', '停用') : (f.loaded ? pill('ok', '已装载') : pill('err', '装载失败')));
+    const opsHTML = (f) => (f.operations || []).map(o => `<span class="chip">${esc(o.operation)} ${esc(o.mode)}</span>`).join(' ') || '—';
+    const refHTML = (f) => {
+      const faces = f.ref_input_faces || {};
+      if (Object.keys(faces).length)
+        return Object.entries(faces).map(([k, v]) => `<span class="chip mono">${esc(k)} ${esc(v)}</span>`).join(' ');
+      return f.ref_input ? `<span class="chip mono">${esc(f.ref_input)}</span>` : '<span class="hint">—</span>';
+    };
+    const modelHTML = (f) => {
+      const m = f.models || [];
+      if (!m.length) return '<span class="hint">—</span>';
+      return m.slice(0, 4).map(x => `<span class="chip mono">${esc(x)}</span>`).join(' ')
+        + (m.length > 4 ? ` <span class="hint">+${m.length - 4}</span>` : '');
+    };
+    const actsHTML = (f) => {
+      const b = [];
+      if (f.editable) {
+        b.push(`<button class="btn btn-sm btn-outline-secondary" onclick="act.pluginEdit('${esc(f.file)}')" title="改代码"><i class="ti ti-pencil"></i> 编辑</button>`);
+        b.push(f.enabled
+          ? `<button class="btn btn-sm btn-outline-secondary" onclick="act.pluginToggle('${esc(f.file)}',false)" title="停用后不再装载，可随时启用"><i class="ti ti-player-pause"></i> 停用</button>`
+          : `<button class="btn btn-sm btn-outline-secondary" onclick="act.pluginToggle('${esc(f.file)}',true)"><i class="ti ti-player-play"></i> 启用</button>`);
+        b.push(`<button class="btn btn-sm btn-outline-danger" onclick="act.pluginDelete('${esc(f.file)}')" title="删除插件文件"><i class="ti ti-trash"></i></button>`);
+      } else {
+        b.push(`<button class="btn btn-sm btn-outline-secondary" onclick="act.pluginView('${esc(f.file)}')" title="内置插件只读"><i class="ti ti-eye"></i> 查看</button>`);
+      }
+      return `<div class="d-flex flex-wrap gap-1">${b.join('')}</div>`;
+    };
+    $('#plugins').innerHTML = errHTML + (files.length ? table(
+      ['插件', '来源', '状态', '支持操作', '参考图', '预置模型', '说明', '操作'],
+      files.map(f => [
+        `<span class="mono">${esc(f.id)}</span>`
+          + (f.label ? `<div class="hint">${esc(f.label)}</div>` : '')
+          + (f.load_error ? `<div class="hint">${esc(f.load_error)}</div>` : '')
+          + (f.used_by && f.used_by.length ? `<div class="hint">实例：${esc(f.used_by.join('、'))}</div>` : ''),
+        srcPill(f), stPill(f), opsHTML(f), refHTML(f), modelHTML(f),
+        `<span class="hint">${esc(f.hint || '')}</span>`, actsHTML(f)]))
+      + `<div class="p-3 hint">插件目录 <code>${esc(d.plugin_dir || '')}</code>：面板安装的插件落在这里（挂载卷，重建容器不丢）。
+         新增一个渠道 = 装插件 → 去「渠道实例」新建实例选它；改完即时生效，不用重启容器。</div>`
+      : emptyBox('没有插件', 'ti-puzzle'));
 
     const s = await api('/api/sysinfo');
     if (s) {
-      $('#verTag').textContent = s.data.version;
-    const e = s.data.enc || {};
-    const encBad = (e.broken ? 1 : 0) + (e.plaintext ? 1 : 0);
-    const et = $('#encTag');
-    if (et) {
-      et.innerHTML = `<i class="ti ${encBad ? 'ti-shield-exclamation' : 'ti-shield-lock'}"></i> ${e.broken ? '密钥解不开 ' + e.broken : (e.plaintext ? '明文残留 ' + e.plaintext : '密钥已加密')}`;
-      et.title = `加密来源：${e.source || '—'}｜已加密 ${e.encrypted || 0} 条｜明文 ${e.plaintext || 0}｜解不开 ${e.broken || 0}`;
-    }
+      const e = s.data.enc || {};
+      const encBad = (e.broken ? 1 : 0) + (e.plaintext ? 1 : 0);
+      const et = $('#encTag');
+      if (et) {
+        et.innerHTML = `<i class="ti ${encBad ? 'ti-shield-exclamation' : 'ti-shield-lock'}"></i> ${e.broken ? '密钥解不开 ' + e.broken : (e.plaintext ? '明文残留 ' + e.plaintext : '密钥已加密')}`;
+        et.title = `加密来源：${e.source || '—'}｜已加密 ${e.encrypted || 0} 条｜明文 ${e.plaintext || 0}｜解不开 ${e.broken || 0}`;
+      }
       $('#pluginTag').innerHTML = (s.data.plugins || []).map(p => `<i class="ti ti-puzzle"></i> ${esc(p)}`).join(' · ');
     }
   },
 
-  showTemplate() {
-    modal('渠道插件模板', `<p class="hint">另存为 <code>app/channels/你的渠道.py</code>，填好元信息和 build()，再点「重载插件」。</p>
-      <pre class="json">${esc(TEMPLATE)}</pre>`);
-  },
-
   async reloadPlugins(btn) {
     const old = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 重载中';
-    const r = await api('/api/channels/reload', {method:'POST'});
+    const r = await api('/api/channels/reload', {method: 'POST'});
     btn.disabled = false; btn.innerHTML = old;
     if (!r) return;
     const e = r.data.errors || {};
-    toast(Object.keys(e).length ? '重载完成，但有插件报错' : `重载成功：${(r.data.loaded||[]).join(', ')}`, Object.keys(e).length > 0);
+    toast(Object.keys(e).length ? '重载完成，但有插件报错' : `重载成功：${(r.data.loaded || []).join(', ')}`, Object.keys(e).length > 0);
     act.loadPlugins();
+  },
+
+  /* -------------------- 渠道插件：增 / 删 / 改 -------------------- */
+  pluginNew() { act.openPluginEditor('', '', true); },
+
+  async pluginEdit(file) {
+    const r = await api('/api/plugins/source?file=' + encodeURIComponent(file));
+    if (!r || !r.ok) { toast((r && r.data && r.data.error) || '读不到源码', true); return; }
+    act.openPluginEditor(r.data.file, r.data.source, false);
+  },
+
+  async pluginView(file) {
+    const r = await api('/api/plugins/source?file=' + encodeURIComponent(file));
+    if (!r || !r.ok) { toast((r && r.data && r.data.error) || '读不到源码', true); return; }
+    modal(`插件源码 · ${r.data.file}`,
+      `<p class="hint">内置插件是只读的（随镜像走，下次构建会被覆盖）。要改就照它另写一个：文件名换成别的，<code>id</code> 也要换。</p>
+       <pre class="pg-src" id="pgSrcBox">${esc(r.data.source)}</pre>`,
+      `<button class="btn btn-outline-secondary" data-bs-dismiss="modal">关闭</button>
+       <button class="btn btn-primary" onclick="copyText($('#pgSrcBox').textContent)"><i class="ti ti-copy"></i> 复制源码</button>`);
+  },
+
+  openPluginEditor(file, source, isNew) {
+    modal(isNew ? '添加插件' : `编辑插件 · ${file}`,
+      `<div class="row g-2 align-items-end">
+         <div class="col-md-4">
+           <label class="form-label">文件名</label>
+           <input id="pgFile" class="form-control mono" value="${esc(file)}" placeholder="my_relay.py" ${isNew ? '' : 'readonly'}>
+         </div>
+         <div class="col-md-8"><div class="hint">文件名就是模块名：小写字母开头，只能小写字母/数字/下划线（如 <code>my_relay.py</code>）。
+           中文名写在代码里的 <code>label</code>。${isNew ? '' : '文件名不可改，要改名就新建一个。'}</div></div>
+       </div>
+       <div class="d-flex flex-wrap gap-2 align-items-center my-3">
+         <button class="btn btn-sm btn-outline-secondary" onclick="act.pluginTemplate()"><i class="ti ti-file-code"></i> 插入模板</button>
+         <button class="btn btn-sm btn-outline-secondary" onclick="act.pluginValidate()"><i class="ti ti-checkup-list"></i> 校验</button>
+         <span id="pgHint" class="hint"></span>
+       </div>
+       <div id="pgEditor" class="cm-host"></div>
+       <div id="pgReport" class="pg-report"></div>
+       <div class="form-check mt-3">
+         <input class="form-check-input" type="checkbox" id="pgAgree">
+         <label class="form-check-label" for="pgAgree">我确认：插件是可执行代码，等同于在本服务上安装程序；我只安装可信来源的插件。</label>
+       </div>`,
+      `<button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+       <button class="btn btn-primary" onclick="act.pluginSave(this)"><i class="ti ti-device-floppy"></i> 校验并安装</button>`,
+      () => cmOpen(source || ''));
+  },
+
+  async pluginTemplate() {
+    const r = await api('/api/plugins/template');
+    if (!r) return;
+    if (cmValue().trim()) {
+      const ok = await UI.confirm('编辑器里已经有内容，用模板覆盖掉？', {okText: '覆盖', danger: false});
+      if (!ok) return;
+    }
+    cmSet(r.data.source);
+    toast('已插入模板：把末尾 CHANNEL 那行的注释去掉，再点「校验」');
+  },
+
+  async pluginValidate() {
+    const file = ($('#pgFile').value || '').trim();
+    const r = await api('/api/plugins/validate', {method: 'POST', body: {file, source: cmValue()}});
+    if (!r) return;
+    renderPluginReport(r.data.report);
+  },
+
+  async pluginSave(btn) {
+    if (!$('#pgAgree').checked) { toast('请先勾选下面那句确认（插件是可执行代码）', true); return; }
+    const file = ($('#pgFile').value || '').trim(), source = cmValue();
+    const old = btn.innerHTML; btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 校验并安装';
+    let r = await api('/api/plugins/save', {method: 'POST', body: {file, source}});
+    if (r && r.status === 400 && r.data && r.data.need_overwrite) {
+      const ok = await UI.confirm(`${file} 已存在，覆盖它？`, {okText: '覆盖'});
+      if (!ok) { btn.disabled = false; btn.innerHTML = old; return; }
+      r = await api('/api/plugins/save', {method: 'POST', body: {file, source, overwrite: true}});
+    }
+    btn.disabled = false; btn.innerHTML = old;
+    if (!r) return;
+    if (r.ok) {
+      toast(`已安装：${r.data.id}（已热重载，不用重启容器）`);
+      closeModal(); act.loadPlugins();
+    } else {
+      renderPluginReport((r.data || {}).report);
+      toast((r.data || {}).error || '没通过校验', true);
+    }
+  },
+
+  async pluginToggle(file, enabled) {
+    const r = await api('/api/plugins/toggle', {method: 'POST', body: {file, enabled}});
+    if (!r) return;
+    toast(r.ok ? `${file} 已${enabled ? '启用' : '停用'}` : ((r.data || {}).error || '操作失败'), !r.ok);
+    act.loadPlugins();
+  },
+
+  async pluginDelete(file) {
+    const ok = await UI.confirm(`删除插件 ${file}？文件会被移除，用它的渠道实例会失效。`, {okText: '删除'});
+    if (!ok) return;
+    const r = await api('/api/plugins?file=' + encodeURIComponent(file), {method: 'DELETE'});
+    if (!r) return;
+    toast(r.ok ? `已删除 ${file}` : ((r.data || {}).error || '删除失败'), !r.ok);
+    act.loadPlugins();
+  },
+
+  async pluginDoc() {
+    const r = await api('/api/plugins/authoring-doc');
+    if (!r) return;
+    modal('给 AI 的插件编写说明',
+      `<p class="hint">把这份说明<b>整段</b>粘给 AI，再把中转站的接口文档附在后面，让它产出一个 <code>.py</code> 文件。
+        拿到代码后贴进「添加插件」→「校验」，有报错连行号一起回给 AI 改。</p>
+       <pre class="pg-doc" id="pgDocBox">${esc(r.data.doc || '')}</pre>`,
+      `<button class="btn btn-outline-secondary" data-bs-dismiss="modal">关闭</button>
+       <button class="btn btn-outline-secondary" onclick="act.pluginDocDownload()"><i class="ti ti-download"></i> 下载 .md</button>
+       <button class="btn btn-primary" onclick="copyText($('#pgDocBox').textContent, '说明已复制，粘给 AI 即可')"><i class="ti ti-copy"></i> 复制全文</button>`);
+  },
+
+  pluginDocDownload() {
+    const box = $('#pgDocBox');
+    if (!box) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([box.textContent], {type: 'text/markdown'}));
+    a.download = 'PLUGIN-AUTHORING.md';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('已下载 PLUGIN-AUTHORING.md');
   },
 
   /* -------------------- 请求日志 -------------------- */
@@ -1830,34 +2015,6 @@ const table = UI.table;
 
 const skelTable = UI.skelTable;   // 骨架屏占位（加载中）
 
-const TEMPLATE = `"""渠道插件模板 —— 复制成 app/channels/你的渠道.py 即可新增一个渠道类型。"""
-from .. import protocols
-from .base import Channel
-
-
-class MyRelay(Channel):
-    id = "my_relay"                     # 唯一标识（渠道实例的 protocol 值）
-    label = "我的中转（示例）"
-    hint = "一句话说明这个渠道怎么工作"
-    default_auth = "bearer"             # bearer | x-goog-api-key | fal_key
-    default_base_url = "https://api.example.com"
-    operations = {"generate": "native", "edit": "native"}
-    models = {"example-image-1": "example-image-1"}
-
-    def build(self, p, body, edit):
-        prompt = body.get("prompt") or ""
-        if not prompt:
-            raise ValueError("prompt is required")     # 铁律：绝不回落默认提示词
-        up_model = protocols.upstream_model(p, body.get("model") or "")
-        url = f"{p['base_url'].rstrip('/')}/v1/images/{'edits' if edit else 'generations'}"
-        return url, {"model": up_model, "prompt": prompt}, {"up_model": up_model}
-
-    def parse(self, payload):
-        urls, _ = protocols.extract_urls(payload)
-        return [{"url": u} for u in urls]
-
-
-CHANNEL = MyRelay()`;
 
 /* ---------------- 启动 ---------------- */
 (async () => {

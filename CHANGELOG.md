@@ -1,3 +1,35 @@
+## [3.13.0] - 2026-09-18
+
+### 新增
+- **渠道插件页可增 / 删 / 改**：面板里直接「添加插件 → 贴代码 → 校验 → 安装」「编辑」「停用 / 启用」「删除」，
+  不用进服务器放文件。上传的插件落在 `QLIKEAPI_PLUGIN_DIR`（默认 `/data/plugins`，挂载卷 → 重建容器不丢），
+  保存即热重载，**不用重启容器**。内置插件只读（要改就另存为新文件名）。
+- **安装前自动校验**（`app/pluginstore.py`）：语法 → 结构（`Channel` 子类 + `CHANNEL` 实例）→
+  危险写法（进程 / 网络 / 文件 / 反射逃逸，带行号）→ **真装一次**（子进程执行、剥掉密钥类环境变量、带超时）
+  → 元信息完整性（`id/label/vendor/docs/protocol_note/hint`、`operations`、`ref_input`、`default_auth`）。
+  报告分「错误 / 提醒 / 通过项」三级，有错误拒绝写入；安装前必须勾选「插件是可执行代码」确认。
+  ⚠ 静态校验**不是沙箱**，只是挡住手滑和明显危险写法。
+- **给 AI 的插件编写说明**：面板「渠道插件 → 给 AI 的说明」一键打开 / 复制 / 下载全文
+  （`docs/PLUGIN-AUTHORING.md`），连同上游接口文档发给 AI 即可产出插件；文档里的示例代码由测试
+  保证**真的**能通过校验（`test_doc_example_passes_validation`）。
+- 插件表格新增列：来源（内置 / 上传）、状态（已装载 / 停用 / 装载失败）、支持操作、参考图口径、
+  预置模型、被哪些渠道实例在用；装载失败的插件连报错一起显示。
+- 新增 API：`GET /api/plugins`、`POST /api/plugins/validate`、`POST /api/plugins/save`、
+  `GET|DELETE /api/plugins`、`POST /api/plugins/toggle`、`GET /api/plugins/source`、
+  `GET /api/plugins/template`、`GET /api/plugins/authoring-doc`。
+
+### 变更
+- 插件装载统一走 `channels.load_path()`（内置与上传走同一条路，模块名统一 `app.channels.<文件名>`）。
+- 「查看模板」改为从 `/api/plugins/template` 取，删掉前端内嵌副本（不再两份漂移）。
+- 编辑器用本地自托管的 CodeMirror 5（`app/static/vendor/codemirror/`），无 CDN 依赖；深浅色自动换主题。
+
+### 修复
+- **`protocols.collect_refs` 之前根本不存在**：模板教插件写 `protocols.collect_refs(body)`，
+  实际会 `AttributeError` —— 已在 `protocols` 里再导出 `collect_refs` / `to_raw_b64` / `snap_size` / `gpt_safe_size`。
+- **编辑已装插件必然失败**：`importlib.reload()` 对「按路径装载的外部模块」会去包目录找文件 →
+  `ModuleNotFoundError`。改为每次重新构造 spec 执行（`channels.load_path`），编辑/覆盖安装后即时生效。
+- **删除停用中的插件报 404**：现在会连 `.py.disabled` 一起处理。
+
 ## [3.12.0] - 2026-09-18
 
 ### 新增

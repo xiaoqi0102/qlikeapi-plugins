@@ -16,6 +16,13 @@ import httpx
 
 from . import store, utils
 
+# 插件作者用得到的工具：从 utils 再导出，插件里只 import protocols 就够了
+# （_template.py 一直在教 protocols.collect_refs，而这个属性以前根本不存在 —— 2026-09-18 修）
+collect_refs = utils.collect_refs
+to_raw_b64 = utils.to_raw_b64
+snap_size = utils.snap_size
+gpt_safe_size = utils.gpt_safe_size
+
 TIMEOUT = float(os.environ.get("QLIKEAPI_TIMEOUT", "900"))
 POLL_INTERVAL = float(os.environ.get("QLIKEAPI_POLL_INTERVAL", "3"))
 POLL_MAX = float(os.environ.get("QLIKEAPI_POLL_MAX", "600"))

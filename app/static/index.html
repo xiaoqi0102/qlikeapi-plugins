@@ -10,6 +10,9 @@
 <!-- 设计变量 + 通用组件库（规范见 docs/DESIGN-SYSTEM.md，展示页 /ui-kit） -->
 <link rel="stylesheet" href="/static/css/tokens.css">
 <link rel="stylesheet" href="/static/css/ui-kit.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/codemirror.min.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/eclipse.min.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/material-darker.min.css">
 </head>
 <body>
 <div id="bar"></div>
@@ -183,10 +186,11 @@
     <section id="v-plugins" hidden>
       <div class="panel">
         <header>
-          <h3><i class="ti ti-puzzle"></i>渠道插件 <span class="hint">放一个 .py 到 app/channels/ 就是一个新渠道</span></h3>
+          <h3><i class="ti ti-puzzle"></i>渠道插件 <span class="hint">面板里直接加 / 改 / 删插件，不用进服务器</span></h3>
           <div class="acts">
-            <button class="btn btn-sm btn-outline-secondary" onclick="act.showTemplate()"><i class="ti ti-file-code"></i> 查看模板</button>
-            <button class="btn btn-sm btn-primary" onclick="act.reloadPlugins(this)"><i class="ti ti-refresh"></i> 重载插件</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="act.pluginDoc()"><i class="ti ti-sparkles"></i> 给 AI 的说明</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="act.reloadPlugins(this)"><i class="ti ti-refresh"></i> 重载插件</button>
+            <button class="btn btn-sm btn-primary" onclick="act.pluginNew()"><i class="ti ti-plus"></i> 添加插件</button>
           </div>
         </header>
         <div class="body tight" id="plugins"></div>
@@ -307,6 +311,10 @@
 
 <script src="/static/vendor/bootstrap.bundle.min.js"></script>
 <script src="/static/vendor/chart.umd.min.js"></script>
+<script src="/static/vendor/codemirror/codemirror.min.js"></script>
+<script src="/static/vendor/codemirror/python.min.js"></script>
+<script src="/static/vendor/codemirror/matchbrackets.min.js"></script>
+<script src="/static/vendor/codemirror/closebrackets.min.js"></script>
 <script src="/static/js/ui-kit.js"></script>
 <script src="/static/js/app.js"></script>
 </body>
