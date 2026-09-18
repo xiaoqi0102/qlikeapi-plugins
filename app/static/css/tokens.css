@@ -1,15 +1,14 @@
 /* tokens.css —— qlikeapi-plugins 设计变量（唯一来源）
  *
  * 只放变量：颜色、圆角、阴影、字号、间距、动效时长。
- * 深色模式只覆盖变量值（body.dark {
-  /* 模型家族（深色） */
-  --fam-gemini-soft:#0c2634; --fam-gpt-soft:#0f2a1c; --fam-claude-soft:#1d1735;
-  --fam-grok-soft:#1a2231; --fam-other-soft:#16243c;
-组件 CSS 里禁止写死颜色。
+ * 深色模式只覆盖变量值（body.dark），组件 CSS 里禁止写死颜色。
  * 规范：docs/DESIGN-SYSTEM.md ｜ 预览：/ui-kit
+ * ⚠ 本文件被破坏过一次：注释里塞了 CSS 会让注释提前闭合、后续规则被整体丢弃，
+ *   改完必须跑 `make ui-lint`（会检查注释闭合 + var() 是否有定义）。
  */
 
 :root{
+  /* ---- 基础色 ---- */
   --sidebar-w: 232px;
   --ink:#0f172a; --ink-2:#334155; --muted:#64748b; --line:#e6ebf2; --bg:#f5f7fb;
   --surface:#ffffff; --field:#eef1f6; --brand-ink:#ffffff;
@@ -17,22 +16,73 @@
   --nav:#0f172a; --nav-ink:#94a3b8;
   --radius:.75rem;
   --card-shadow:0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.12);
-}
 
-:root{
-  --r-xs:6px; --r-sm:9px; --r:12px; --r-lg:16px;
+  /* ---- 圆角 / 阴影 / 焦点环 ---- */
+  --r-2xs:4px; --r-xs:6px; --r-sm:9px; --r:12px; --r-lg:16px; --r-pill:999px;
   --sh-1:0 1px 2px rgba(15,23,42,.05);
   --sh-2:0 1px 2px rgba(15,23,42,.05), 0 6px 18px -10px rgba(15,23,42,.14);
   --sh-3:0 2px 4px rgba(15,23,42,.06), 0 18px 40px -18px rgba(15,23,42,.20);
   --ring:0 0 0 3px rgba(47,107,255,.22);
+
+  /* ---- 语义浅底 ---- */
   --brand-soft:#eef3ff; --ok-soft:#e9f8ef; --warn-soft:#fdf4e6; --err-soft:#fdeeee;
   --line-2:#eef1f6;
-  /* 模型家族配色（预设药丸按模型名自动归类用；浅/深色各一套） */
+
+  /* ---- 模型家族配色（预设药丸按模型名自动归类用） ---- */
   --fam-gemini:#0284c7; --fam-gemini-soft:#e6f4fc;
   --fam-gpt:#15803d; --fam-gpt-soft:#e8f7ee;
   --fam-claude:#6d28d9; --fam-claude-soft:#f2ecfe;
   --fam-grok:#475569; --fam-grok-soft:#eef1f6;
   --fam-other:#2f6bff; --fam-other-soft:#eef3ff;
+
+  /* ---- 表面层级（表头/分页条/次级卡片）---- */
+  --surface-2:#fbfdff;      /* 抬升一档：表头、分页条、面板头渐变底 */
+  --surface-3:#f7f9fc;      /* 再抬一档：药丸底、次级卡片 */
+  --line-strong:#cfd8e6;    /* 控件边框、hover 边框 */
+  --ink-3:#5b6b82;          /* 表头/次要说明文字 */
+
+  /* ---- 交互底色（hover 全部走这里，深色自动跟随）---- */
+  --hover:#f8faff;          /* 表格行、可点行 */
+  --hover-2:#f2f6ff;        /* 图标按钮、outline 按钮 */
+  --hover-3:#e7eefb;        /* 药丸、下拉选项 */
+
+  /* ---- 状态色（文字 / 边框，成对定义才能深色自适应）---- */
+  --ok-ink:#15803d; --ok-line:#cdeed7;
+  --warn-ink:#b45309; --warn-line:#f6e3b4;
+  --err-ink:#b91c1c; --err-line:#f8d7d7;
+  --brand-line:#dbe6ff;
+
+  /* ---- 语义补充 ---- */
+  --note-bg:#f7faff;        /* 提示块底（品牌淡染） */
+  --brand-text:#2f6bff;     /* 品牌色文字（深色下要提亮，与 --brand 分开） */
+  --err-strong:#b91c1c; --warn-strong:#f59e0b; --ok-strong:#22c55e;
+
+  /* ---- 品牌 / 侧栏 / 杂项 ---- */
+  --brand-hi:#3d78ff;       /* 主按钮渐变亮端 */
+  --nav-brand:#cfe0ff; --nav-inset:rgba(255,255,255,.04);
+  --sw-off:#d7dfea;         /* 开关关闭态轨道 */
+  --empty-ink:#b9c6d8;      /* 空状态图标 */
+  --mask-opaque:#000;       /* mask-image 的不透明端（与主题无关） */
+  --overlay:rgba(15,23,42,.45);  /* 确认框/遮罩 */
+
+  /* ---- 品牌渐变 / 光晕 / 骨架屏 ---- */
+  --brand-rgb:47 107 255;   /* box-shadow 里的 rgb(var(--brand-rgb) / .25) 用 */
+  --shadow-rgb:15 23 42;
+  --grad-1:#4f8bff; --grad-2:#8b5cf6;
+  --sk-1:#e7ebf2; --sk-2:#dde3ec;
+
+  /* ---- 侧栏（本身就是深色，两套主题共用）---- */
+  --nav-hover:rgba(255,255,255,.06);
+  --nav-line:rgba(255,255,255,.14);
+  --nav-ink-2:#cbd5e1;
+
+  /* ---- 排版 / 间距 / 动效（docs/DESIGN-SYSTEM.md §2 的规范值） ---- */
+  /* 字号刻度（9 档，写死 px 一律收敛到这里；收敛规则见 docs/DESIGN-SYSTEM.md §2） */
+  --fs-xs:11px; --fs-sm:12px; --fs-base:13px; --fs-md:14px; --fs-lg:15px; --fs-xl:18px;
+  --fs-2xl:20px; --fs-3xl:22px; --fs-hero:26px; --fs-icon:30px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px;
+  --dur-xfast:.06s; --dur-fast:.12s; --dur:.15s; --dur-slow:.3s; --dur-spin:.7s; --dur-pulse:1.25s;
+
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
 }
 
@@ -45,11 +95,24 @@ body.dark{
   --sh-2:0 1px 3px rgba(0,0,0,.45), 0 8px 22px -12px rgba(0,0,0,.70);
   --sh-3:0 2px 6px rgba(0,0,0,.50), 0 22px 48px -20px rgba(0,0,0,.80);
   --ring:0 0 0 3px rgba(47,107,255,.32);
-}
+  /* 表面 / 边框 / 交互（深色） */
+  --surface-2:#131b29; --surface-3:#1b2434;
+  --line-strong:#3a4a68; --ink-3:#93a1b5;
+  --hover:#182132; --hover-2:#1c2740; --hover-3:#233047;
 
-/* 排版 / 间距 / 动效 —— docs/DESIGN-SYSTEM.md §2 的规范值（新组件一律引用，别写魔法数字） */
-:root{
-  --fs-xs:11px; --fs-sm:12px; --fs-base:13px; --fs-lg:15px; --fs-xl:18px;
-  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px;
-  --dur:.15s;
+  /* 状态色（深色）：文字提亮、边框压暗 */
+  --ok-ink:#6ee7a8; --ok-line:#20492f;
+  --warn-ink:#f2c078; --warn-line:#4d3d1c;
+  --err-ink:#f79b9b; --err-line:#4d2727;
+  --brand-line:#24395e;
+
+  --note-bg:#16243c; --brand-text:#7aa7ff;
+  --err-strong:#ef4444; --warn-strong:#fbbf24; --ok-strong:#22c55e;
+  --shadow-rgb:0 0 0;
+  --brand-hi:#24396e; --sw-off:#2b3d61; --empty-ink:#4b5b74;
+  --overlay:rgba(0,0,0,.6);
+  --sk-1:#1e293b; --sk-2:#26334a;
+  /* 模型家族（深色） */
+  --fam-gemini-soft:#0c2634; --fam-gpt-soft:#0f2a1c; --fam-claude-soft:#1d1735;
+  --fam-grok-soft:#1a2231; --fam-other-soft:#16243c;
 }

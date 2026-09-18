@@ -1516,7 +1516,7 @@ const act = {
       ['站点','类型','余额','已用','套餐/账号','最近检查','状态',''],
       state.sites.map(s => [`<div><b>${esc(s.name)}</b></div>${s.base_url ? `<div class="hint mono">${esc(s.base_url)}</div>` : ''}`,
         `<span class="chip">${esc(s.type_label || s.type)}</span>`,
-        `<span class="num" style="font-size:15px">${money(s.last_balance, s.last_unit)}</span>${s.low ? ' ' + pill('warn', '低') : ''}`,
+        `<span class="num" style="font-size:var(--fs-lg)">${money(s.last_balance, s.last_unit)}</span>${s.low ? ' ' + pill('warn', '低') : ''}`,
         `<span class="num hint">${s.last_used == null ? '—' : money(s.last_used, s.last_unit)}</span>`,
         `<span class="hint">${esc(s.last_plan || '—')}</span>`, `<span class="hint">${fmtTime(s.last_checked)}</span>`,
         s.last_error ? pill('err', '失败') : (s.last_checked ? pill('ok dot', '正常') : pill('', '未查询')),

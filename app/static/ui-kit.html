@@ -27,7 +27,7 @@
 </head>
 <body>
 <div class="kit-head">
-  <h1><i class="ti ti-components"></i> UI 组件库 <span class="hint" style="font-size:12px">qlikeapi-plugins · 实时预览</span></h1>
+  <h1><i class="ti ti-components"></i> UI 组件库 <span class="hint fs-sm">qlikeapi-plugins · 实时预览</span></h1>
   <span class="hint">规范文档：docs/DESIGN-SYSTEM.md</span>
   <a class="btn btn-sm btn-outline-secondary" href="/"><i class="ti ti-arrow-left"></i> 回控制台</a>
   <button class="btn btn-sm btn-outline-secondary" onclick="document.body.classList.toggle('dark')">
@@ -46,9 +46,17 @@
   <section class="kit-sec" id="c-color">
     <h2><i class="ti ti-palette"></i>色彩与排版<span class="pill">tokens.css</span></h2>
     <div class="panel"><div class="body">
-      <div class="kit-row" id="swatches"></div>
-      <div class="hint mt-3">正文 13px / 表格 12.5px / 标题 14–16px；辅助文字用 <code class="mono">.hint</code>（--muted）。数字与代码用 <code class="mono">.num</code> / <code class="mono">.mono</code> 等宽对齐。</div>
-      <div class="kit-code">改色只改 tokens.css 的 :root；深色模式改 body.dark 的同名变量，组件里不要写死颜色</div>
+      <div id="swatchGroups"></div>
+      <div class="k mt-3">字号刻度 <code class="mono">--fs-*</code>（11/12/13/14/15/18/20/22/26/30）</div>
+      <div class="kit-row" id="fsRow"></div>
+      <div class="k mt-3">圆角刻度 <code class="mono">--r-*</code>（4/6/9/12/16/999）</div>
+      <div class="kit-row" id="rRow"></div>
+      <div class="k mt-3">动效时长 <code class="mono">--dur-*</code>（鼠标悬停看过渡快慢）</div>
+      <div class="kit-row" id="durRow"></div>
+      <div class="hint mt-3">正文 <code class="mono">--fs-base</code> 13px / 表格与表头 <code class="mono">--fs-sm</code> 12px /
+        辅助文字 <code class="mono">.hint</code>（<code class="mono">--muted</code>）。数字与代码用 <code class="mono">.num</code> /
+        <code class="mono">.mono</code> 等宽对齐。**写死 px 一律按 §2.2 就近取档收敛，`make ui-lint` 会拦。**</div>
+      <div class="kit-code">改色/改字号只改 tokens.css；深色模式在 body.dark 覆盖**同名变量**，组件里不许出现字面量</div>
     </div></div>
   </section>
 
@@ -223,13 +231,38 @@
 <script src="/static/js/ui-kit.js"></script>
 <script>
 /* 组件展示页：所有交互都是真实的（点了就有反应），可直接抄这里的用法 */
-const TOKENS = ['--ink','--ink-2','--muted','--brand','--ok','--warn','--err','--bg','--line','--brand-soft','--ok-soft','--warn-soft','--err-soft'];
-document.getElementById('swatches').innerHTML = TOKENS.map(t => {
-  const v = getComputedStyle(document.documentElement).getPropertyValue(t).trim();
-  return `<span class="chip" style="display:inline-flex;align-items:center;gap:6px">
-    <i style="display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.12);background:${v}"></i>
-    <span class="mono" style="font-size:11px">${t} ${v}</span></span>`;
-}).join('');
+/* 设计变量总览：与 docs/DESIGN-SYSTEM.md §2 的分组保持一致 */
+const TOKEN_GROUPS = [
+  ['文字', ['--ink', '--ink-2', '--ink-3', '--muted', '--brand-text']],
+  ['面 / 线', ['--bg', '--surface', '--surface-2', '--surface-3', '--field', '--line', '--line-strong']],
+  ['交互底色', ['--hover', '--hover-2', '--hover-3']],
+  ['品牌', ['--brand', '--brand-2', '--brand-hi', '--brand-soft', '--brand-line', '--brand-ink']],
+  ['语义', ['--ok', '--ok-soft', '--ok-ink', '--ok-line', '--warn', '--warn-soft', '--warn-ink', '--warn-line',
+            '--err', '--err-soft', '--err-ink', '--err-line', '--note-bg']],
+  ['侧栏', ['--nav', '--nav-ink', '--nav-ink-2', '--nav-hover', '--nav-brand']],
+  ['模型家族', ['--fam-gemini', '--fam-gpt', '--fam-claude', '--fam-grok', '--fam-other']],
+];
+document.getElementById('swatchGroups').innerHTML = TOKEN_GROUPS.map(([name, list]) => `
+  <div class="k mt-2">${name}</div>
+  <div class="kit-row">${list.map(t => {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(t).trim();
+    return `<span class="chip" style="display:inline-flex;align-items:center;gap:6px">
+      <i class="tk-sw" style="background:${v}"></i>
+      <span class="mono fs-xs">${t} ${v}</span></span>`;
+  }).join('')}</div>`).join('');
+
+/* 刻度展示：字号 / 圆角 / 时长（数值全部来自 tokens.css，展示页自己不写 px） */
+const FS = ['--fs-xs', '--fs-sm', '--fs-base', '--fs-md', '--fs-lg', '--fs-xl', '--fs-2xl', '--fs-3xl'];
+const RADII = ['--r-2xs', '--r-xs', '--r-sm', '--r', '--r-lg', '--r-pill'];
+const DURS = ['--dur-xfast', '--dur-fast', '--dur', '--dur-slow'];
+const rootVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+document.getElementById('fsRow').innerHTML = FS.map(n =>
+  `<span class="chip">${n.replace('--fs-', '')} · <span style="font-size:var(${n})">字号示例 Aa 123</span></span>`).join('');
+document.getElementById('rRow').innerHTML = RADII.map(n =>
+  `<span class="chip">${n.replace('--r-', '')} <i class="tk-sq" style="border-radius:var(${n})"></i> ${rootVar(n)}</span>`).join('');
+document.getElementById('durRow').innerHTML = DURS.map(n =>
+  `<button class="btn btn-sm btn-outline-secondary" title="${n} = ${rootVar(n)}"
+     onclick="UI.toast('${n} = ${rootVar(n)}')">${n.replace('--dur', 'dur') || 'dur'} ${rootVar(n)}</button>`).join('');
 
 document.getElementById('kpis').innerHTML =
   UI.stat('站点数量', '11', '已启用 11', 'ti-building', '') +

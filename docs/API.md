@@ -224,7 +224,7 @@ gemini 与 gpt 常常不同组）—— 同一个渠道里放多组密钥，路�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/healthz` | `{"ok":true,"app":"qlikeapi-plugins","version":"3.9.0","plugins":[…],"plugin_errors":{},"providers":[…]}` |
+| GET | `/healthz` | `{"ok":true,"app":"qlikeapi-plugins","version":"3.10.0","plugins":[…],"plugin_errors":{},"providers":[…]}` |
 | GET | `/` | 控制台页面（未登录跳 `/login`） |
 | GET | `/static/*` | 前端静态资源 |
 

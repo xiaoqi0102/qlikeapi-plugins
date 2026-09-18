@@ -25,6 +25,8 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: ruff
         run: ruff check app tests scripts
+      - name: 设计规范（变量/注释/硬编码，见 docs/DESIGN-SYSTEM.md）
+        run: python scripts/ui_lint.py
 
   test:
     name: test (py${{ matrix.python-version }})

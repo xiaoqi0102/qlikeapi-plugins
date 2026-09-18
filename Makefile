@@ -8,7 +8,7 @@ VENV  ?= .venv
 PORT  ?= 18673
 
 .DEFAULT_GOAL := help
-.PHONY: help install run test test-cov lint fmt check verify ui-diff docker-build up down logs restart backup clean
+.PHONY: help install run test test-cov lint fmt check verify ui-lint ui-diff docker-build up down logs restart backup clean
 
 help: ## 显示所有可用命令
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -33,10 +33,13 @@ lint: ## 静态检查（ruff）
 fmt: ## 自动修复可修复的 lint 问题
 	$(VENV)/bin/ruff check --fix app tests scripts
 
-check: lint test ## 提交前必跑：lint + 测试
+check: lint ui-lint test ## 提交前必跑：lint + 设计规范 + 测试
 
 verify: ## 零成本验收：本地校验 / dry-run / 抹 prompt 探活（不打真实出图）
 	$(PY) scripts/verify_v3.py
+
+ui-lint: ## 设计规范检查（变量/注释/硬编码色/字号/圆角/时长；违规退出码 1）
+	$(PY) scripts/ui_lint.py
 
 ui-diff: ## 新旧样式 A/B 计算样式比对（需 playwright + chromium；期望「合计差异: 0」）
 	@# 前置：容器里要有一份「旧样式表」当对照组，重建镜像后会丢，需重新注入：
