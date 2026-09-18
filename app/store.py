@@ -123,6 +123,8 @@ MIGRATIONS = [
     ("model_prices", "source", "TEXT"),
     ("logs", "kind", "TEXT DEFAULT 'relay'"),
     ("logs", "attempts", "INTEGER"),
+    # v3.15.1：异步任务页展示所有渠道（fal 队列 / 上游任务号轮询）
+    ("jobs", "mode", "TEXT DEFAULT 'queue'"),
     ("logs", "key_index", "INTEGER"),
     # v3.1：渠道分流与自动熔断
     ("providers", "weight", "INTEGER DEFAULT 1"),

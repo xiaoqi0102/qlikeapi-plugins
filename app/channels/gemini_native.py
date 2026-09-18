@@ -27,6 +27,7 @@ class GeminiNative(Channel):
     default_base_url = "https://generativelanguage.googleapis.com"
     operations = {"generate": "converted", "edit": "converted"}
     # 官方只吃 parts[].inlineData（裸 base64），不吃 URL → 不转换
+    site_type = "manual"      # 加渠道时自动建这种「站点余额」条目
     ref_input = "base64"
     models = {
         "gemini-3.1-flash-image": "gemini-3.1-flash-image",

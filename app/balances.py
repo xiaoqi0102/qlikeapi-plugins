@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from . import store
+from . import channels, store
 
 HTTP = httpx.Client(timeout=httpx.Timeout(20, connect=10), follow_redirects=True)
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -477,10 +477,15 @@ def _newapi_token_groups(site: dict, api_key: str = "") -> list:
             continue
         if tail and tail not in str(t.get("key") or ""):
             continue
-        g = t.get("group")
-        if isinstance(g, (list, tuple)):
-            return [str(x).strip() for x in g if str(x).strip()]
-        return [x.strip() for x in str(g or "").replace("，", ",").split(",") if x.strip()]
+        # 新版 New API：group=默认分组（单个），groups=多分组数组（含失败备用，按选择顺序）
+        for field in ("groups", "group"):
+            g = t.get(field)
+            if isinstance(g, (list, tuple)):
+                out = [str(x).strip() for x in g if str(x).strip()]
+            else:
+                out = [x.strip() for x in str(g or "").replace("，", ",").split(",") if x.strip()]
+            if out:
+                return out
     return []
 
 
@@ -613,6 +618,39 @@ def _sync_site_prices(site: dict, only_provider: str | None = None) -> dict:
                 "per_provider": {k: v for k, v in res_all.items() if k != "payload"}}
 
     return {"site": name, "error": f"站点类型 {stype or '未知'} 不支持价格直读（目前支持 sub2api / newapi）"}
+
+
+def ensure_site_for_provider(p: dict, create: bool = True) -> dict:
+    """渠道实例 ↔ 站点余额条目联动：加渠道时顺手把站点条目建出来。
+
+    · 同一个 base_url 只建一个站点（已存在就复用，不覆盖你填过的令牌 / uid）；
+    · 站点类型优先用插件声明的 site_type（如 change2pro→sub2api、aicost→newapi），
+      没声明就记成「手工记账」，免得余额查询天天报错；
+    · 令牌 / uid 这类凭据一律留空，由用户在「站点余额」页手动填（不猜、不兜底）。
+    """
+    sid = p.get("site_id")
+    if str(sid or "").strip() not in ("", "None"):
+        s = store.get_site(int(sid))
+        if s:
+            return {"site_id": int(sid), "created": False, "type": s.get("type"),
+                    "name": s.get("name"), "linked": True}
+    base = (p.get("base_url") or "").rstrip("/")
+    if not base:
+        return {"error": "渠道没填 base_url，无法建站点余额条目"}
+    for s in store.list_sites():
+        if (s.get("base_url") or "").rstrip("/") == base:
+            return {"site_id": int(s["id"]), "created": False, "type": s.get("type"),
+                    "name": s.get("name"), "linked": True}
+    if not create:
+        return {"error": "还没有对应的站点余额条目"}
+    ch = channels.get(p.get("protocol") or "")
+    stype = (getattr(ch, "site_type", "") or "manual") if ch else "manual"
+    label = p.get("label") or p.get("key") or base
+    new_id = store.save_site({"name": label, "type": stype, "base_url": base,
+                              "token": "", "uid": "", "extra": {"auto_created_by": p.get("key") or ""}})
+    return {"site_id": int(new_id), "created": True, "type": stype, "name": label,
+            "need": (TYPE_META.get(stype) or {}).get("need", ""),
+            "note": "站点条目已自动建好，令牌 / uid 请到「站点余额」页手动填"}
 
 
 def sync_provider_prices(key: str) -> dict:

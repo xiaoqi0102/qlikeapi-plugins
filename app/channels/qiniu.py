@@ -21,6 +21,7 @@ from .base import Channel
 class Qiniu(Channel):
     id = "qiniu"
     label = "七牛 ModelInk（同步 + fal 异步合一）"
+    site_type = "manual"      # 加渠道时自动建这种「站点余额」条目
     vendor = "七牛云 / ModelInk（api.qnaigc.com）"
     docs = "https://www.qiniu.com"
     hint = "同一站点按模型自动分流：gemini 系走 fal 异步队列，gpt-image 系走同步面（固定 b64_json）"

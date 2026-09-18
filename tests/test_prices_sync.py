@@ -125,6 +125,7 @@ class _FakeResp:
     def json(self):
         return {"success": True, "data": {"items": [
             {"key": "other****ZZZZ", "group": "无关分组"},
+            {"key": "bKcI****WreC", "groups": ["即梦便宜900分组", "gpt-image-2-主", "nano-banana渠道2"]},
             {"key": "bKcI****WreC", "group": "即梦便宜900分组,gpt-image-2-主"},
         ]}}
 
@@ -134,8 +135,9 @@ def test_token_groups_parsed_in_order(monkeypatch):
     from app import balances
     monkeypatch.setattr(balances.HTTP, "get", lambda url, headers=None, **kw: _FakeResp())
     site = {"base_url": "https://www.aicost.me", "token": "tk", "uid": "2774"}
+    # groups（多分组数组）优先，保持选择顺序 —— aicost 实测就是这个字段
     assert balances._newapi_token_groups(site, api_key="sk-bKcIabcdefWreC") == \
-        ["即梦便宜900分组", "gpt-image-2-主"]
+        ["即梦便宜900分组", "gpt-image-2-主", "nano-banana渠道2"]
     assert balances._newapi_token_groups(site, api_key="sk-unknown0000") == []
 
 

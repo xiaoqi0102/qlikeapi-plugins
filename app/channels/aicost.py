@@ -48,6 +48,7 @@ def _safe_id(tid) -> str:
 class Aicost(Channel):
     id = "aicost"
     label = "aicost.me（image2 + Gemini 合一）"
+    site_type = "newapi"      # 加渠道时自动建这种「站点余额」条目
     vendor = "aicost.me"
     docs = "https://www.aicost.me"
     hint = "同一站点按模型自动分流：gemini 系走 generateContent，gpt-image 系走 /v1/images/*"

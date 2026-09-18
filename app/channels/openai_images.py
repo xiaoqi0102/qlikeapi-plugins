@@ -30,6 +30,7 @@ class OpenAIImages(Channel):
     default_base_url = ""
     operations = {"generate": "native", "edit": "native"}
     # 官方 image 参数同时接受 URL 与 base64 data URI → 按用户口径「优先公网 URL」
+    site_type = "manual"      # 加渠道时自动建这种「站点余额」条目
     ref_input = "both"
     models = {
         "gpt-image-2": "gpt-image-2",

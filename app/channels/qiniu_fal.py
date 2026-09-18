@@ -30,6 +30,7 @@ class QiniuFal(Channel):
     default_base_url = "https://api.qnaigc.com"
     operations = {"generate": "queue", "edit": "queue"}
     # 文档口径：异步队列只拉公网 URL，不接受 base64/本地文件 → base64 必须先转图床直链
+    site_type = "manual"      # 加渠道时自动建这种「站点余额」条目
     ref_input = "url"
     models = {
         "gemini-3.1-flash-image-preview": "fal-ai/gemini-3.1-flash-image-preview",

@@ -256,6 +256,25 @@ def prepare(p: dict, body: dict, edit: bool) -> tuple[str, dict, dict]:
     return url, up, meta
 
 
+def _job_id(ch, up_json: Any) -> str:
+    """上游响应里的任务号：插件自己认的优先（task_id），再兜底扫常见字段名。
+
+    异步任务页要展示「所有渠道」的异步请求，不只 fal 队列，所以这里做通用识别。
+    """
+    try:
+        tid = ch.task_id(up_json) if (ch is not None and hasattr(ch, "task_id")) else None
+    except Exception:
+        tid = None
+    if isinstance(tid, str) and tid.strip():
+        return tid.strip()
+    if isinstance(up_json, dict):
+        for k in ("task_id", "taskId", "request_id", "requestId"):
+            v = up_json.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return ""
+
+
 def _shape_success(p: dict, body: dict, meta: dict, up_json: Any, headers: dict, provider: str, t0: float):
     """把上游结果归一化成 OpenAI 图片响应形状。"""
     ch = channels.get(p.get("protocol") or "")
@@ -267,8 +286,9 @@ def _shape_success(p: dict, body: dict, meta: dict, up_json: Any, headers: dict,
             urls, _ = protocols.extract_urls(up_json)
             return {"created": int(time.time()), "data": [{"url": u} for u in urls]}
         meta["request_id"] = rid
-        store.execute("INSERT OR REPLACE INTO jobs(request_id,provider,model,status,submit_at)"
-                      " VALUES(?,?,?, 'RUNNING', ?)", (rid, provider, body.get("model"), int(time.time())))
+        store.execute("INSERT OR REPLACE INTO jobs(request_id,provider,model,status,submit_at,mode)"
+                      " VALUES(?,?,?, 'RUNNING', ?, 'queue')",
+                      (rid, provider, body.get("model"), int(time.time())))
         state, payload = protocols.poll_fal(meta, headers)
         urls, err = protocols.extract_urls(payload)
         if state != "OK" or not urls:
@@ -287,11 +307,26 @@ def _shape_success(p: dict, body: dict, meta: dict, up_json: Any, headers: dict,
     if not data and isinstance(up_json, dict) and isinstance(up_json.get("data"), list):
         data = up_json["data"]
     if not data and ch is not None and ch.has_async_poll():
-        # 上游回了任务号而不是图（如 aicost.me）→ 交给插件轮询，客户端照样拿到同步结果
+        # 上游回了任务号而不是图（如 aicost.me）→ 交给插件轮询，客户端照样拿到同步结果。
+        # 这类异步请求同样要进「异步任务」页（不只 fal 队列），先记 RUNNING 再按结果收尾。
+        tid = _job_id(ch, up_json)
+        if tid:
+            store.execute("INSERT OR REPLACE INTO jobs(request_id,provider,model,status,submit_at,mode)"
+                          " VALUES(?,?,?, 'RUNNING', ?, 'poll')",
+                          (tid, provider, body.get("model"), int(time.time())))
         state, polled = ch.poll(up_json, meta or {}, headers)
         if state == "OK":
             up_json = polled
             data = ch.parse(polled) or [{"url": u} for u in protocols.extract_urls(polled)[0]]
+            if tid:
+                got, _ = protocols.extract_urls(polled)
+                store.execute("UPDATE jobs SET status='DONE', finish_at=?, result=? WHERE request_id=?",
+                              (int(time.time()), json.dumps(got, ensure_ascii=False)[:2000], tid))
+        elif tid and state != "SKIP":
+            store.execute("UPDATE jobs SET status=?, finish_at=?, error=? WHERE request_id=?",
+                          (state or "FAILED", int(time.time()), f"轮询未取到图（{state}）", tid))
+        elif tid:
+            store.execute("DELETE FROM jobs WHERE request_id=?", (tid,))   # 不是异步任务，别留脏行
     if not data:
         urls, err = protocols.extract_urls(up_json)
         if urls:

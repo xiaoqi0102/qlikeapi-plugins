@@ -1226,7 +1226,17 @@ const act = {
     if (keys) body.api_key = keys;
     const r = await api('/api/providers', {method:'POST', body});
     if (!r) return;
-    if (r.ok) { closeModal(); toast('已保存'); act.loadProviders(); } else toast(r.data.error || '保存失败', true);
+    if (r.ok) {
+      const s = (r.data && r.data.site) || {};
+      closeModal();
+      if (s.created) toast(`已保存；已同步站点余额条目「${s.name}」（${s.type}）——令牌 / id 到「站点余额」页手填`);
+      else if (s.site_id) toast('已保存；已关联站点余额条目');
+      else if (s.error) toast(`已保存；站点联动未完成：${s.error}`, true);
+      else toast('已保存');
+      act.loadProviders();
+      state.sites = [];
+      if (typeof act.loadSites === 'function') act.loadSites();
+    } else toast(r.data.error || '保存失败', true);
   },
 
   async providerDelete(key) {
@@ -1743,14 +1753,20 @@ const act = {
   async loadJobs() {
     const r = await api('/api/jobs?limit=100');
     if (!r) return;
+    const MODE2 = {queue:['info','队列'], poll:['warn','任务轮询']};
     $('#jobs').innerHTML = r.data.length ? table(
-      ['request_id','渠道','模型','状态','提交','完成','结果 / 错误'],
-      r.data.map(j => [`<span class="mono">${esc(j.request_id)}</span>`, esc(j.provider),
-        `<span class="mono">${esc(j.model||'')}</span>`,
-        pill(j.status === 'DONE' ? 'ok' : j.status === 'RUNNING' ? 'warn' : 'err', j.status),
-        `<span class="hint">${fmtTime(j.submit_at)}</span>`, `<span class="hint">${fmtTime(j.finish_at)}</span>`,
-        `<span class="hint">${esc((j.result || j.error || '').slice(0, 140))}</span>`]))
-      : emptyBox('还没有 fal 异步任务（只有 fal 类渠道才会产生）', 'ti-hourglass');
+      ['任务号','渠道','方式','模型','状态','提交','耗时','结果 / 错误'],
+      r.data.map(j => {
+        const m = MODE2[j.mode] || ['', '—'];
+        const sec = (j.finish_at && j.submit_at) ? `${Math.max(0, j.finish_at - j.submit_at)}s` : '—';
+        return [`<span class="mono">${esc(j.request_id)}</span>`, esc(j.provider),
+          m[1] === '—' ? '<span class="hint">—</span>' : pill(m[0], m[1]),
+          `<span class="mono">${esc(j.model||'')}</span>`,
+          pill(j.status === 'DONE' ? 'ok' : j.status === 'RUNNING' ? 'warn' : 'err', j.status),
+          `<span class="hint">${fmtTime(j.submit_at)}</span>`, `<span class="hint">${sec}</span>`,
+          `<span class="hint">${esc((j.result || j.error || '').slice(0, 140))}</span>`];
+      })
+    ) : emptyBox('还没有异步任务（fal 队列、或上游回任务号再轮询的渠道都会记在这里）', 'ti-hourglass');
   },
 
   // 单渠道价格同步：只动这一个渠道的价，从它自己配置的平台直读

@@ -92,6 +92,7 @@ class Channel:
     def info(self) -> dict:
         return {"id": self.id, "label": self.label, "hint": self.hint,
                 "vendor": self.vendor, "docs": self.docs, "note": self.protocol_note,
+                "site_type": getattr(self, "site_type", ""),
                 "auth_modes": list(self.auth_modes), "default_auth": self.default_auth,
                 "default_base_url": self.default_base_url,
                 "operations": [{"operation": op, "mode": mode} for op, mode in self.operations.items()],

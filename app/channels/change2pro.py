@@ -16,6 +16,7 @@ from .base import Channel
 class Change2Pro(Channel):
     id = "change2pro"
     label = "Change2Pro（香蕉 + image2 合一）"
+    site_type = "sub2api"      # 加渠道时自动建这种「站点余额」条目
     vendor = "Change2Pro（api.change2pro.com）"
     docs = "https://api.change2pro.com"
     hint = "同一站点按模型自动分流：gemini 系走 generateContent，gpt-image 系走 /images/generations"

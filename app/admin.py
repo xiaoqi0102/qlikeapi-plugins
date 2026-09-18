@@ -395,9 +395,18 @@ async def api_provider_upsert(request: Request):
                               ensure_ascii=False),
                    int(d.get("priority") or 0), 1 if d.get("enabled", True) else 0,
                    max(1, int(d.get("weight") or 1)),
-                   int(d["site_id"]) if str(d.get("site_id") or "").strip() not in ("", "None") else None,
+                   int(d["site_id"]) if str(d.get("site_id") or "").strip() not in ("", "None", "0") else None,
                    int(time.time())))
-    return {"ok": True, "key": key}
+    # 渠道 ↔ 站点余额联动：加了渠道就保证有对应的站点条目（凭据留空，由用户手填）
+    info = balances.ensure_site_for_provider({
+        "key": key, "label": d.get("label") or old.get("label") or key,
+        "protocol": d.get("protocol") or old.get("protocol") or "openai_images",
+        "base_url": (d.get("base_url") or old.get("base_url") or "").rstrip("/"),
+        "site_id": d.get("site_id") if d.get("site_id") is not None else old.get("site_id")})
+    given = str(d.get("site_id") or "").strip() not in ("", "None", "0")
+    if info.get("site_id") and not given:
+        store.execute("UPDATE providers SET site_id=? WHERE key=?", (info["site_id"], key))
+    return {"ok": True, "key": key, "site": info}
 
 
 @router.post("/providers/{key}/patch")
