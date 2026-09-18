@@ -67,6 +67,8 @@
 
   /* ---- 品牌渐变 / 光晕 / 骨架屏 ---- */
   --brand-rgb:47 107 255;   /* box-shadow 里的 rgb(var(--brand-rgb) / .25) 用 */
+  --black-rgb: 0 0 0;
+  --white-rgb: 255 255 255;
   --shadow-rgb:15 23 42;
   --grad-1:#4f8bff; --grad-2:#8b5cf6;
   --sk-1:#e7ebf2; --sk-2:#dde3ec;
@@ -84,6 +86,78 @@
   --dur-xfast:.06s; --dur-fast:.12s; --dur:.15s; --dur-slow:.3s; --dur-spin:.7s; --dur-pulse:1.25s;
 
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+
+  /* ── 精确收敛补充（值与原字面量完全相等）── */
+  --bd-x1: rgba(255,255,255,.14);
+  --bd-x56: #e9bcbc;
+  --bd-x58: #f3cccc;
+  --bd-x59: #f3e0c0;
+  --bd-x60: #cfdcef;
+  --bd-x61: #c9d9ff;
+  --bd-x62: #c9d9ff;
+  --bd-x63: #cdddfb;
+  --bd-x64: #dbe3ef;
+  --bd-x65: #cfe0ff;
+  --bg-x19: #070a11;
+  --bg-x2: rgba(255,255,255,.05);
+  --bg-x20: #0c1322;
+  --bg-x21: #0f1725;
+  --bg-x22: #0f1725;
+  --bg-x23: #0f172a;
+  --bg-x25: #111c33;
+  --bg-x26: #3a1d20;
+  --bg-x27: #1e2f52;
+  --bg-x28: #26334a;
+  --bg-x29: #334155;
+  --bg-x3: rgba(255,255,255,.06);
+  --bg-x32: #b91c1c;
+  --bg-x33: #b91c1c;
+  --bg-x4: rgba(47,107,255,.22);
+  --err-bright: #ef4444;   /* 强调红（恒定） */
+  --bg-x41: #0ea5e9;
+  --bg-x43: #f59e0b;
+  --bg-x45: #3b82f6;
+  --bg-x46: #3d78ff;
+  --bg-x49: #60a5fa;
+  --bg-x5: rgba(47,107,255,.06);
+  --bg-x50: #7aa2ff;
+  --bg-x52: #7aa7ff;
+  --bg-x6: rgba(15,23,42,.45);
+  --bg-x68: #f4fdf7;
+  --bg-x69: #ffffff;
+  --fg-x24: #0f172a;
+  --fg-x30: #0f8a4a;
+  --fg-x31: #1b3a8f;
+  --fg-x34: #b4232a;
+  --fg-x35: #4b5563;
+  --fg-x36: #a16207;
+  --fg-x37: #4a5a72;
+  --fg-x38: #d13438;
+  --fg-x39: #5f6d84;
+  --fg-x42: #7b879b;
+  --fg-x44: #7b8aa1;
+  --fg-x47: #8492a6;
+  --fg-x48: #9aa4b2;
+  --fg-x51: #a8b3c4;
+  --fg-x53: #8ab4ff;
+  --fg-x54: #b8c4d6;
+  --fg-x55: #b9c6d8;
+  --fg-x57: #f7b9b9;
+  --fg-x66: #cfe0ff;
+  --fg-x67: #d7e3f7;
+  --fg-x70: #ffffff;
+  --sh-x10: rgba(0,0,0,.6);
+  --sh-x11: rgba(15,23,42,.05);
+  --sh-x12: rgba(15,23,42,.22);
+  --sh-x13: rgba(47,107,255,.25);
+  --sh-x14: rgba(15,23,42,.14);
+  --sh-x15: rgba(47,107,255,.14);
+  --sh-x16: rgba(255,255,255,.04);
+  --sh-x17: rgba(15,23,42,.25);
+  --sh-x18: rgba(47,107,255,.045);
+  --sh-x7: rgba(0,0,0,.5);
+  --sh-x8: rgba(15,23,42,.28);
+  --sh-x9: rgba(15,23,42,.32);
 }
 
 body.dark{
@@ -108,6 +182,8 @@ body.dark{
 
   --note-bg:#16243c; --brand-text:#7aa7ff;
   --err-strong:#ef4444; --warn-strong:#fbbf24; --ok-strong:#22c55e;
+  --black-rgb: 0 0 0;
+  --white-rgb: 255 255 255;
   --shadow-rgb:0 0 0;
   --brand-hi:#24396e; --sw-off:#2b3d61; --empty-ink:#4b5b74;
   --overlay:rgba(0,0,0,.6);
@@ -115,4 +191,27 @@ body.dark{
   /* 模型家族（深色） */
   --fam-gemini-soft:#0c2634; --fam-gpt-soft:#0f2a1c; --fam-claude-soft:#1d1735;
   --fam-grok-soft:#1a2231; --fam-other-soft:#16243c;
+
+  /* ── 深色补充刻度 ── */
+  --bd-x58: #7f2d2d;
+  --bd-x59: #4d3d1c;
+  --bd-x61: #3a4a68;
+  --bd-x64: #2b3d61;
+  --bg-x22: #1b2434;
+  --bg-x26: #3a1d20;
+  --bg-x32: #3a1d20;
+  --bg-x45: #3b82f6;
+  --bg-x49: #60a5fa;
+  --bg-x68: #12271d;
+  --bg-x69: #233047;
+  --fg-x24: #ffffff;
+  --fg-x36: #e5bd6d;
+  --fg-x37: #a9b6c9;
+  --fg-x53: #8ab4ff;
+  --fg-x55: #4b5b74;
+  --fg-x57: #f7b9b9;
+  --fg-x70: #e8edf5;
+  --sh-x14: rgba(0,0,0,.5);
+  --sh-x16: rgba(255,255,255,.03);
+  --sh-x9: rgba(0,0,0,.5);
 }
