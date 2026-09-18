@@ -6,7 +6,11 @@
 本脚本保证两次抓取是**同一个 DOM 状态**（不重新加载页面，只换样式表），因此可以按下标一一对齐。
 
 用法：
-  docker cp /tmp/style.css.bak <容器>:/app/static/style.css     # 提供旧样式做对照
+  # 对照组 = 上一版样式（tokens.css + 上一版 ui-kit.css），不是仓库里那份远古单文件 style.css：
+  git show HEAD~1:app/static/css/ui-kit.css > /tmp/uikit_prev.css
+  cat app/static/css/tokens.css /tmp/uikit_prev.css > /tmp/baseline.css
+  docker cp /tmp/baseline.css <容器>:/app/static/style.css
+  # 期望：除「本次新增的组件类」外全站 0 差异；注入过期对照组会得到满屏假差异。
   QLIKEAPI_ADMIN_USER=.. QLIKEAPI_ADMIN_PASS=.. python3 scripts/ui_style_diff.py
 """
 from __future__ import annotations
@@ -76,7 +80,7 @@ def diff_rows(a, b):
             continue
         for p in PROPS:
             if x[p] != y[p]:
-                out.append((i, f'{x["tag"]}.{x["cls"]}', p, y[p], x[p]))
+                out.append((i, f'{x["tag"]}.{x["cls"]}', p, x[p], y[p]))
     if len(a) != len(b):
         out.append((-1, "(元素数)", "count", str(len(a)), str(len(b))))
     return out
@@ -154,7 +158,7 @@ async def main():
             if d:
                 allbad += len(d)
                 print(f"\n⚠ 令牌弹窗（含多选选择器）: {len(d)} 处差异")
-                for _i, el, p, ov, nv in d[:14]:
+                for _i, el, p, nv, ov in d[:14]:
                     print(f"   {el} → {p}: 新={nv!r} 旧={ov!r}")
             else:
                 print("✓ 令牌弹窗（含多选选择器）: 除新组件外完全一致")

@@ -42,8 +42,11 @@ ui-lint: ## 设计规范检查（变量/注释/硬编码色/字号/圆角/时长
 	$(PY) scripts/ui_lint.py
 
 ui-diff: ## 新旧样式 A/B 计算样式比对（需 playwright + chromium；期望「合计差异: 0」）
-	@# 前置：容器里要有一份「旧样式表」当对照组，重建镜像后会丢，需重新注入：
-	@#   git stash 前先备份旧 style.css，然后 docker cp <旧style.css> qlikeapi-plugins:/app/static/style.css
+	@# 前置：容器里要有一份「上一版样式」当对照组，重建镜像后会丢，需重新注入：
+	@#   git show HEAD~1:app/static/css/ui-kit.css > /tmp/uikit_prev.css
+	@#   cat app/static/css/tokens.css /tmp/uikit_prev.css > /tmp/baseline.css
+	@#   docker cp /tmp/baseline.css qlikeapi-plugins:/app/static/style.css
+	@# ⚠ 别注入远古单文件 style.css，否则满屏假差异
 	@curl -sf -o /dev/null http://127.0.0.1:$(PORT)/static/style.css || \
 	  { echo "✗ 容器内缺 /static/style.css（旧样式对照组），先 docker cp 注入，否则比对全是假差异"; exit 2; }
 	$(PY) scripts/ui_style_diff.py
