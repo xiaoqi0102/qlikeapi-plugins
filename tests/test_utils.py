@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app import utils
@@ -185,3 +187,46 @@ def test_to_raw_b64_strips_whitespace_in_data_uri():
 ])
 def test_mask(secret, keep, want):
     assert utils.mask(secret, keep) == want
+
+
+# ---------------------------------------------------------------- v3.7.0：官方尺寸/档位口径
+def test_snap_size_passthrough_keeps_client_pixels():
+    """passthrough = 一个像素都不改（给「上游实际接受更大尺寸」的渠道用）。"""
+    dec = utils.snap_size("4096x4096", "gpt-image-2", "passthrough")
+    assert dec["size"] == "4096x4096"
+    assert dec["changed"] is False and dec["family"] == "passthrough"
+    assert "原样透传" in dec["note"]
+
+
+def test_snap_mode_is_still_the_default():
+    """默认仍是吸附：4096x4096 超出官方上限（边长 ≤3840、面积 ≤8,294,400）→ 方形最大 2880x2880。"""
+    dec = utils.snap_size("4096x4096", "gpt-image-2")
+    assert dec["size"] == "2880x2880"
+    assert dec["changed"] is True
+    assert "边长超 3840" in dec["note"] and "总像素出界" in dec["note"]
+
+
+def test_official_gpt_sizes_are_all_legal_and_labelled():
+    """官方「常用尺寸」表里的每一个都必须自己合法，且都有中文标签（面板 chips 用）。"""
+    for a, b in utils.GPT_SIZES:
+        assert utils._free_ok(a, b), f"{a}x{b} 不符合官方约束"
+        assert f"{a}x{b}" in utils.OFFICIAL_GPT_LABEL
+
+
+def test_gemini_tokens_match_official_table():
+    assert utils.gemini_tokens("gemini-3.1-flash-image")["2K"] == 1680
+    assert utils.gemini_tokens("gemini-3-pro-image")["2K"] == 1120
+    assert utils.gemini_tokens("gemini-2.5-flash-image")["1K"] == 1290
+
+
+def test_gemini_plan_exposes_official_tier_table():
+    """官方档位表必须能被摊开：16:9 的 2K 就是 2752x1536，且**没有** 3840x2160 这一档。"""
+    plan = utils.gemini_plan(1920, 1080, "gemini-3.1-flash-image")
+    assert plan["tiers"] == {"0.5K": "688x384", "1K": "1376x768", "2K": "2752x1536", "4K": "5504x3072"}
+    assert plan["tokens"] == 1680 and plan["nominal"] == 2048
+    assert "3840" not in json.dumps(plan["tiers"])
+
+
+def test_gemini_plan_pro_has_no_half_k():
+    plan = utils.gemini_plan(1920, 1080, "gemini-3-pro-image")
+    assert "0.5K" not in plan["tiers"] and plan["tiers"]["4K"] == "5504x3072"

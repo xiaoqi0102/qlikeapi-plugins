@@ -76,3 +76,23 @@ def test_pages_reference_component_library():
         assert needle in index, f"index.html 缺少引用：{needle}"
     kit = (STATIC / "ui-kit.html").read_text(encoding="utf-8")
     assert "js/ui-kit.js" in kit and "UI.picker" in kit
+
+
+def test_official_size_chips_match_python_table():
+    """面板上「OpenAI 官方常用尺寸」的 chips 与 app/utils.py 的 GPT_SIZES 必须一字不差。
+
+    两边各写一份是没办法的（前端要在没有请求的情况下就能渲染），所以用测试锁死一致性 ——
+    否则官方尺寸表改了一边，另一边会悄悄漂移。
+    """
+    import sys
+
+    sys.path.insert(0, str(STATIC.parent.parent))
+    from app import utils
+
+    js = (STATIC / "js" / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"OFFICIAL_SIZES:\s*\[(.*?)\]\],", js, re.S)
+    assert m, "app.js 里找不到 OFFICIAL_SIZES"
+    pairs = re.findall(r"\['(\d+x\d+)',\s*'([^']*)'\]", m.group(0))   # 用整段匹配，含末尾 ]]，否则最后一个元素会被截掉
+    assert pairs, "OFFICIAL_SIZES 解析失败"
+    assert {s for s, _ in pairs} == {f"{a}x{b}" for a, b in utils.GPT_SIZES}
+    assert dict(pairs) == utils.OFFICIAL_GPT_LABEL

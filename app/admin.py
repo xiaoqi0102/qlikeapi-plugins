@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 import secrets
 import time
@@ -526,7 +527,8 @@ def _chain_item(p: dict) -> dict:
     return {"provider": p["key"], "label": p["label"], "priority": p.get("priority") or 0,
             "plugin": p.get("protocol"), "base_url": p.get("base_url"),
             "keys": len(store.provider_keys(p)), "enabled": bool(p.get("enabled")),
-            "healthy": h.get("ok"), "checked_at": h.get("checked_at")}
+            "healthy": h.get("ok"), "checked_at": h.get("checked_at"),
+            "size_mode": protocols.size_mode(p), "gemini_size_policy": protocols.gemini_policy(p)}
 
 
 @router.get("/routes")
@@ -984,18 +986,19 @@ def api_prices_prune(request: Request):
 
 
 @router.get("/size-plan")
-def api_size_plan(request: Request, model: str = "", size: str = "", policy: str = ""):
+def api_size_plan(request: Request, model: str = "", size: str = "", policy: str = "", mode: str = ""):
     """尺寸换算（零成本、不出图）：这个模型 + 这个尺寸，最终会变成什么。"""
     u, err = need_user(request)
     if err:
         return err
+    mode = mode if mode in ("snap", "passthrough") else "snap"
     wh = utils.parse_size(size)
     if not wh:
         return {"model": model, "size": size, "error": "size 需要写成 1920x1080 这种形式"}
     w, h = wh
     fam = utils.fixed_sizes_for(model)
     if fam:
-        dec = utils.snap_size(size, model)
+        dec = utils.snap_size(size, model, mode)
         return {"model": model, "size": size, "family": "fixed", "final": dec["size"],
                 "changed": dec["changed"], "note": dec["note"],
                 "allowed": [f"{a}x{b}" for a, b in fam]}
@@ -1004,19 +1007,27 @@ def api_size_plan(request: Request, model: str = "", size: str = "", policy: str
     if is_gemini:
         pol = policy or "class"
         plan = utils.gemini_plan(w, h, model, pol)
-        return {"model": model, "size": size, "family": "gemini", "policy": pol,
+        return {"model": model, "size": size, "family": "gemini", "policy": pol, "mode": mode,
                 "ratio": plan["ratio"], "tier": plan["tier"],
                 "final": f"{plan['pixels'][0]}x{plan['pixels'][1]}",
                 "changed": f"{plan['pixels'][0]}x{plan['pixels'][1]}" != f"{w}x{h}",
-                "note": plan["note"],
-                "tiers": {t: [f"{a}x{b}" for a, b in utils.GEMINI_SIZES[utils.gemini_caps(model)[0]].get(plan["ratio"], {}).values()]
-                          for t in utils.gemini_caps(model)[1]}}
-    dec = utils.snap_size(size, model)
-    return {"model": model, "size": size, "family": "free", "final": dec["size"],
+                "note": plan["note"], "tiers": plan["tiers"], "tokens": plan["tokens"],
+                "tokens_all": plan["tokens_all"], "nominal": plan["nominal"],
+                "image_size_values": list(utils.GEMINI_TIERS),
+                "source": "ai.google.dev《Image generation》—— image_size 只接受 512px/1K/2K/4K" +
+                          "（大写 K），输出像素由「档位+比例」决定，给不了任意像素"}
+    dec = utils.snap_size(size, model, mode)
+    official = [{"size": f"{a}x{b}", "label": utils.OFFICIAL_GPT_LABEL.get(f"{a}x{b}", "")}
+                for a, b in utils.GPT_SIZES]
+    near = min(utils.GPT_SIZES, key=lambda s: abs(math.log((w * h) / (s[0] * s[1]))))
+    return {"model": model, "size": size, "family": "free", "mode": mode, "final": dec["size"],
             "changed": dec["changed"], "note": dec["note"] or f"{dec['size']}（已合规，原样透传）",
+            "official": official,
+            "nearest_official": {"size": f"{near[0]}x{near[1]}",
+                                 "label": utils.OFFICIAL_GPT_LABEL.get(f"{near[0]}x{near[1]}", "")},
             "rules": {"edge_multiple": 16, "edge_max": 3840, "ratio_max": "3:1",
                       "area_min": 655_360, "area_max": 8_294_400,
-                      "source": "Azure OpenAI《GPT image models》"}}
+                      "source": "OpenAI《Image generation》/ Azure OpenAI《GPT image models》"}}
 
 
 @router.post("/health/run")

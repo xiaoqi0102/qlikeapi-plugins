@@ -136,3 +136,42 @@ def test_prune_removes_orphan_prices(login, db):
     assert r["removed"] == 1
     left = [x["provider"] for x in db.rows("SELECT provider FROM model_prices")]
     assert left == ["*"]
+
+
+# ---------------------------------------------------------------- v3.7.0：原样透传 + 官方表可见
+def test_passthrough_channel_never_touches_the_size(client, make_provider, fake_upstream):
+    """渠道 options.size_mode=passthrough → 4096x4096 原样发上游，且不该出现 X-QLike-Size。"""
+    make_provider(key="pt", priority=20, model_map={"gpt-image-2": "gpt-image-2"},
+                  options={"size_mode": "passthrough"})
+    calls = fake_upstream(200, {"data": [{"url": "https://k.example.com/pt.png"}]}, '{"data":[]}')
+    r = client.post("/v1/images/generations",
+                    json={"model": "gpt-image-2", "prompt": "猫", "size": "4096x4096"}, headers=MASTER)
+    assert r.status_code == 200
+    assert "X-QLike-Size" not in r.headers
+    assert calls[0]["body"]["size"] == "4096x4096"
+
+
+def test_snap_channel_still_snaps(client, make_provider, fake_upstream):
+    """同一个尺寸，默认渠道（snap）依然吸附到官方上限内的最大方形。"""
+    make_provider(key="snap", priority=20, model_map={"gpt-image-2": "gpt-image-2"})
+    calls = fake_upstream(200, {"data": [{"url": "https://k.example.com/s.png"}]}, '{"data":[]}')
+    r = client.post("/v1/images/generations",
+                    json={"model": "gpt-image-2", "prompt": "猫", "size": "4096x4096"}, headers=MASTER)
+    assert r.status_code == 200
+    assert r.headers["X-QLike-Size"] == "4096x4096->2880x2880"
+    assert calls[0]["body"]["size"] == "2880x2880"
+
+
+def test_size_plan_exposes_official_tables(login):
+    """换算接口要把官方口径摊开：Gemini 档位表 + token；GPT 官方常用尺寸 + 最近的官方尺寸。"""
+    d = login.get("/api/size-plan?model=gemini-3.1-flash-image&size=1920x1080").json()
+    assert d["tiers"]["2K"] == "2752x1536" and d["tokens"] == 1680
+    assert "3840" not in str(d["tiers"]) and "image_size" in d["source"]
+    g = login.get("/api/size-plan?model=gpt-image-2&size=4096x4096").json()
+    assert g["final"] == "2880x2880" and g["mode"] == "snap"
+    assert g["nearest_official"]["size"] == "3840x2160" and g["nearest_official"]["label"] == "4K 横"
+    assert {o["size"] for o in g["official"]} == {"1024x1024", "1536x1024", "1024x1536",
+                                                 "2048x2048", "2048x1152", "1152x2048",
+                                                 "3840x2160", "2160x3840"}
+    pt = login.get("/api/size-plan?model=gpt-image-2&size=4096x4096&mode=passthrough").json()
+    assert pt["final"] == "4096x4096" and pt["mode"] == "passthrough"

@@ -287,6 +287,16 @@ def gemini_policy(p: dict) -> str:
     return v if v in ("class", "ceil", "floor", "nearest") else "class"
 
 
+def size_mode(p: dict) -> str:
+    """尺寸处理方式（渠道实例 options.size_mode 可覆盖）。
+
+    snap（默认）：按官方约束最小改动吸附，非法尺寸只修不合法的那一边；
+    passthrough：一个像素都不改，原样发给上游（上游实际接受更大尺寸时用这个）。
+    """
+    v = str((p.get("options") or {}).get("size_mode") or "snap").lower()
+    return v if v in ("snap", "passthrough") else "snap"
+
+
 def _size_meta(from_s: str, to_s: str, note: str, extra: str = "") -> dict:
     """尺寸换算的对外呈现：中文说明给面板/日志，纯 ASCII 给响应头（HTTP 头不能放中文）。"""
     if from_s == to_s and not extra:
@@ -360,7 +370,7 @@ def build_openai_images(p: dict, body: dict, edit: bool = False) -> tuple[str, d
     removed = apply_removals(up, [f for f in flat if "." in f or "*" in f] + nested)
     size_meta: dict = {}
     if up.get("size"):
-        dec = utils.snap_size(up["size"], up_model)
+        dec = utils.snap_size(up["size"], up_model, size_mode(p))
         up["size"] = dec["size"]
         size_meta = _size_meta(dec["original"] or "", dec["size"], dec["note"])
     if "quality" in up:
@@ -403,7 +413,7 @@ def build_fal_queue(p: dict, body: dict, edit: bool = False) -> tuple[str, dict,
     size_meta: dict = {}
     if wh:
         if is_gpt:
-            dec = utils.snap_size(body.get("size"), up_model)
+            dec = utils.snap_size(body.get("size"), up_model, size_mode(p))
             up["image_size"] = dec["size"]
             size_meta = _size_meta(dec["original"] or "", dec["size"], dec["note"])
         else:

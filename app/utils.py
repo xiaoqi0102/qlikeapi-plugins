@@ -21,8 +21,20 @@ FIXED_SIZE_MODELS = (
     ("gpt-image-1", ((1024, 1024), (1536, 1024), (1024, 1536))),
     ("dall-e-3", ((1024, 1024), (1792, 1024), (1024, 1792))),
 )
+# OpenAI 官方「常用尺寸」（developers.openai.com《Image generation》指南，2026-09 复核）：
+#   1024x1024 / 1536x1024 / 1024x1536 / 2048x2048（2K 方）/ 2048x1152（2K 横）/
+#   3840x2160（4K 横）/ 2160x3840（4K 竖）/ auto
+# ⚠ 命名差异（容易踩坑）：OpenAI 的「4K」= 3840x2160（8.29MP），**不是** 4096x4096 ——
+#   gpt-image-2 的边长上限就是 3840，面积上限 8,294,400，所以方形最大只能到 2880x2880
+#   （2880² = 8,294,400，正好等于 3840x2160 的像素总量，同属官方 4K 档）。
+#   Gemini 的「4K 方图」才是 4096x4096（Google 按方图边长定义档位）。
 GPT_SIZES = [(1024, 1024), (1536, 1024), (1024, 1536), (2048, 2048),
              (2048, 1152), (1152, 2048), (3840, 2160), (2160, 3840)]
+OFFICIAL_GPT_LABEL = {
+    "1024x1024": "1K 方", "1536x1024": "1K 横", "1024x1536": "1K 竖",
+    "2048x2048": "2K 方", "2048x1152": "2K 横", "1152x2048": "2K 竖",
+    "3840x2160": "4K 横", "2160x3840": "4K 竖",
+}
 RATIOS = [("21:9", 21 / 9), ("16:9", 16 / 9), ("3:2", 1.5), ("4:3", 4 / 3), ("5:4", 1.25),
           ("1:1", 1.0), ("4:5", 0.8), ("3:4", 0.75), ("2:3", 2 / 3), ("9:16", 9 / 16),
           ("4:1", 4.0), ("1:4", 0.25), ("8:1", 8.0), ("1:8", 0.125)]
@@ -105,6 +117,16 @@ def gemini_ratio(w: int, h: int, model: str | None = None) -> str:
 GEMINI_NOMINAL = {"0.5K": 512, "1K": 1024, "2K": 2048, "4K": 4096}
 
 
+def gemini_tokens(model: str | None) -> dict[str, int]:
+    """该模型各档位的官方 token 消耗（ai.google.dev 图片生成文档，按档位计费时看这个）。"""
+    m = (model or "").lower()
+    if "2.5" in m or "2-5" in m:
+        return {"1K": 1290}
+    if "pro" in m:
+        return {"1K": 1120, "2K": 1120, "4K": 2000}
+    return {"0.5K": 747, "1K": 1120, "2K": 1680, "4K": 2520}
+
+
 def gemini_tier(w: int, h: int, model: str | None = None, policy: str = "class") -> str:
     """选分辨率档位（Gemini 只能给档位，不能给任意像素）。
 
@@ -146,7 +168,12 @@ def gemini_plan(w: int, h: int, model: str | None = None, policy: str = "class")
     how = {"class": "按档位分类", "ceil": "向上取档（不降级）", "floor": "向下取档（最省）",
            "nearest": "取最接近档"}.get(policy, policy)
     bigger = "比请求大" if px[0] * px[1] > w * h else ("比请求小" if px[0] * px[1] < w * h else "与请求等大")
+    tk = gemini_tokens(model)
+    _, tiers_ok, _ = gemini_caps(model)
     return {"ratio": ratio, "tier": tier, "pixels": px,
+            "tiers": {t: f"{table[t][0]}x{table[t][1]}" for t in tiers_ok if t in table},
+            "tokens": tk.get(tier), "tokens_all": {t: tk[t] for t in tiers_ok if t in tk},
+            "nominal": GEMINI_NOMINAL.get(tier),
             "note": f"{w}x{h} → {ratio} · {tier} · 实际输出 {px[0]}x{px[1]}（{bigger}；{how}，"
                     f"Gemini 只能给「档位+比例」，给不了任意像素）"}
 
@@ -225,16 +252,22 @@ def _fit_free(w: int, h: int) -> tuple[int, int]:
     return nw, nh
 
 
-def snap_size(size: Any, model: str | None = None) -> dict:
+def snap_size(size: Any, model: str | None = None, mode: str = "snap") -> dict:
     """尺寸换算（GPT 系）：返回 {size, original, changed, family, note}。
 
     关键：**最小改动** —— 只把不合法的那一边就近修到 16 的倍数（平手向下），
     绝不为了凑比例把整张图放大一档（上游按 1K/2K/4K 分档计费时，放大一档＝多扣费）。
+
+    mode=snap（默认）：按官方约束吸附；mode=passthrough：一个像素都不改，原样发给上游
+    （给「上游实际接受更大尺寸」的渠道用；不合法时由上游报错，本服务不再兜底）。
     """
     wh = parse_size(size)
     if not wh:
         return {"size": "auto", "original": None, "changed": False, "family": "auto", "note": ""}
     w, h = wh
+    if mode == "passthrough":
+        return {"size": f"{w}x{h}", "original": f"{w}x{h}", "changed": False,
+                "family": "passthrough", "note": "原样透传（该渠道已关闭尺寸吸附，合法性交给上游判断）"}
     fixed = fixed_sizes_for(model)
     if fixed:
         best = min(fixed, key=lambda s: abs(math.log((w / h) / (s[0] / s[1]))))

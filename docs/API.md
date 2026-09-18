@@ -201,7 +201,7 @@ curl -s -X POST "http://127.0.0.1:18673/up/change2pro/v1/images/preview" \
 | POST | `/api/prices/sync` | 从 New API 同步价格口径 |
 | POST | `/api/prices/prune` | 清理**孤儿价**（`provider` 已不存在的遗留行），返回 `{removed, items}`；删渠道时已自动级联清理，这里是兜底 |
 | DELETE | `/api/prices/{id}` | 删一条价格 |
-| GET | `/api/size-plan?model=&size=&policy=` | **尺寸换算**（纯计算、零成本、不出图）：返回 `{size, final, changed, family, ratio, tier, policy, note, rules?, allowed?}`。GPT 系按最小改动吸附；Gemini 系返回档位/比例与**实际输出像素**。`policy` = `class`（默认）/`floor`/`nearest`/`ceil` |
+| GET | `/api/size-plan?model=&size=&policy=&mode=` | **尺寸换算**（纯计算、零成本、不出图）：返回 `{size, final, changed, family, mode, ratio, tier, policy, note, rules?, allowed?, official?, nearest_official?, tiers?, tokens?, tokens_all?, source?}`。GPT 系按最小改动吸附（`official` = 官方常用尺寸，`nearest_official` = 离请求最近的那个）；Gemini 系返回档位/比例、**实际输出像素**（`tiers` = 该比例下整张官方档位表）与官方 token 消耗。`policy` = `class`（默认）/`floor`/`nearest`/`ceil`；`mode` = `snap`（默认）/`passthrough`（原样透传不改尺寸） |
 | GET | `/api/sites` / `/api/sites/types` | 站点余额与取数器类型 |
 | POST | `/api/sites` | 新建/更新站点（含 `warn_line` 余额预警线） |
 | POST | `/api/sites/{id}/check` | 查这一个站点的余额 |
@@ -216,7 +216,7 @@ curl -s -X POST "http://127.0.0.1:18673/up/change2pro/v1/images/preview" \
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/healthz` | `{"ok":true,"app":"qlikeapi-plugins","version":"3.6.0","plugins":[…],"plugin_errors":{},"providers":[…]}` |
+| GET | `/healthz` | `{"ok":true,"app":"qlikeapi-plugins","version":"3.7.0","plugins":[…],"plugin_errors":{},"providers":[…]}` |
 | GET | `/` | 控制台页面（未登录跳 `/login`） |
 | GET | `/static/*` | 前端静态资源 |
 

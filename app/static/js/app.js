@@ -789,12 +789,16 @@ const act = {
         </div>
         <div class="col-md-8"><label class="form-label">渠道微调 options（JSON，可选）</label>
           <textarea class="form-control" id="fOptions">${esc(JSON.stringify(p?.options || {}, null, 2))}</textarea>
-          <div class="hint mt-1">drop_fields（支持点号路径，如 <code>generationConfig.thinkingConfig</code>）/ force_fields / generations_path / edits_path / image_size_override / drop_quality / gemini_size_policy（class|floor|nearest|ceil）</div></div>
+          <div class="hint mt-1">drop_fields（支持点号路径，如 <code>generationConfig.thinkingConfig</code>）/ force_fields / generations_path / edits_path / image_size_override / drop_quality / gemini_size_policy（class|floor|nearest|ceil）/ size_mode（snap|passthrough）</div></div>
         <div class="col-md-4">
           <label class="form-label">优先级<span class="hint"> 数字大者优先</span></label><input class="form-control mb-3" id="fPrio" type="number" value="${p?.priority ?? 0}">
           <label class="form-label">权重<span class="hint"> 同优先级内按权重分流</span></label><input class="form-control mb-3" id="fWeight" type="number" min="1" value="${p?.weight ?? 1}">
           <label class="form-label">并发上限<span class="hint"> 该渠道同时最多跑几个请求，0=不限</span></label><input class="form-control mb-3" id="fConc" type="number" min="0" value="${(p?.options || {}).max_concurrency || 0}">
           <label class="form-label">同档重试<span class="hint"> 失败先在本优先级重试几次再降档，0=直接降档</span></label><input class="form-control mb-3" id="fRetry" type="number" min="0" max="2" value="${(p?.options || {}).retry || 0}">
+          <label class="form-label">尺寸处理<span class="hint"> 客户端传的尺寸怎么发给上游</span></label><select class="form-select mb-3" id="fSizeMode">
+            ${[['snap','按官方约束吸附（默认）'],['passthrough','原样透传（一个像素都不改）']].map(([v, t]) =>
+              `<option value="${v}" ${(((p?.options || {}).size_mode) || 'snap') === v ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
           <label class="form-label">Gemini 档位策略<span class="hint"> Gemini 只能给「档位+比例」</span></label><select class="form-select mb-3" id="fGeminiPolicy">
             ${[['class','按档位分类（默认）'],['floor','向下取档（最省）'],['nearest','取最接近档'],['ceil','向上取档（不降级）']].map(([v, t]) =>
               `<option value="${v}" ${(((p?.options || {}).gemini_size_policy) || 'class') === v ? 'selected' : ''}>${t}</option>`).join('')}
@@ -902,6 +906,8 @@ const act = {
     if (rt > 0) options.retry = rt; else delete options.retry;
     const gp = $('#fGeminiPolicy') ? $('#fGeminiPolicy').value : 'class';   // Gemini 档位策略
     if (gp && gp !== 'class') options.gemini_size_policy = gp; else delete options.gemini_size_policy;
+    const sm = $('#fSizeMode') ? $('#fSizeMode').value : 'snap';            // 尺寸处理方式
+    if (sm === 'passthrough') options.size_mode = sm; else delete options.size_mode;
     const body = {key, label: $('#fLabel').value.trim() || key, protocol: $('#fProto').value,
       base_url: $('#fBase').value.trim(), auth_mode: $('#fAuth').value, model_map, options,
       priority: parseInt($('#fPrio').value || '0', 10), weight: Math.max(1, parseInt($('#fWeight').value || '1', 10)),
@@ -1042,27 +1048,55 @@ const act = {
                <select class="form-select form-select-sm" id="spPolicy" style="width:190px">
                  <option value="class">按档位分类（默认）</option><option value="floor">向下取档（最省）</option>
                  <option value="nearest">取最接近档</option><option value="ceil">向上取档（不降级）</option></select></div>
+             <div><label class="form-label">尺寸处理</label>
+               <select class="form-select form-select-sm" id="spMode" style="width:190px">
+                 <option value="snap">按官方约束吸附</option><option value="passthrough">原样透传（不改）</option></select></div>
              <button class="btn btn-sm btn-primary" onclick="act.sizePlan()"><i class="ti ti-ruler-measure"></i> 换算</button>
              <button class="btn btn-sm btn-outline-secondary" onclick="act.syncPrices(this)"><i class="ti ti-cloud-download"></i> 从上游同步真实价格</button>
            </div>
-           <div id="spOut" class="mt-2"><span class="hint">填模型名 + 尺寸，看本服务最终会发给上游什么：GPT 系走「最小改动吸附」，Gemini 系只能给「档位 + 宽高比」，实际输出像素见结果。</span></div>
+           <div class="mt-2"><span class="hint">OpenAI 官方常用尺寸（点一下填进去）：</span>
+             ${act.OFFICIAL_SIZES.map(([sz, lb]) => `<span class="chip mono" style="cursor:pointer" onclick="act.fillSize('${sz}')" title="${lb}">${sz} <span class="hint">${lb}</span></span>`).join(' ')}</div>
+           <div id="spOut" class="mt-2"><span class="hint">填模型名 + 尺寸，看本服务最终会发给上游什么：GPT 系走「最小改动吸附」（只修不合法的那一边，绝不放大一档），Gemini 系只能给「档位 + 宽高比」，实际输出像素见结果。</span></div>
          </div></div>`
       : emptyBox('还没有配置任何模型', 'ti-sitemap');
   },
+
+  // OpenAI 官方「常用尺寸」（与 app/utils.py 的 GPT_SIZES 对齐，tests/test_static.py 会校验一致性）
+  OFFICIAL_SIZES: [['1024x1024', '1K 方'], ['1536x1024', '1K 横'], ['1024x1536', '1K 竖'],
+                   ['2048x2048', '2K 方'], ['2048x1152', '2K 横'], ['1152x2048', '2K 竖'],
+                   ['3840x2160', '4K 横'], ['2160x3840', '4K 竖']],
+
+  fillSize(sz) { $('#spSize').value = sz; act.sizePlan(); },
 
   async sizePlan() {
     const model = ($('#spModel').value || '').trim();
     const size = ($('#spSize').value || '').trim();
     const policy = $('#spPolicy').value;
-    const r = await api(`/api/size-plan?model=${encodeURIComponent(model)}&size=${encodeURIComponent(size)}&policy=${policy}`);
+    const mode = $('#spMode') ? $('#spMode').value : 'snap';
+    const r = await api(`/api/size-plan?model=${encodeURIComponent(model)}&size=${encodeURIComponent(size)}&policy=${policy}&mode=${mode}`);
     if (!r) return;
     const d = r.data || {};
     if (d.error) { $('#spOut').innerHTML = `<span class="t-err">${esc(d.error)}</span>`; return; }
+    // Gemini：把官方档位表整张摊开（每个档位的真实像素 + token），一眼看清 2K/4K 到底是多少像素
+    const tierTable = d.tiers ? `<div class="mt-1"><span class="hint">官方档位表（${esc(d.ratio)}，image_size 只能填 512px/1K/2K/4K）：</span><br>
+        ${Object.entries(d.tiers).map(([t, px]) => {
+          const tk = d.tokens_all && d.tokens_all[t] ? ` · ${d.tokens_all[t]} tokens` : '';
+          const cur = t === d.tier;
+          return `<span class="chip mono" style="${cur ? 'border-color:var(--brand);font-weight:600' : ''}">${t} = ${px}${tk}${cur ? ' ← 本次' : ''}</span>`;
+        }).join(' ')}</div>` : '';
+    // GPT 自由尺寸：官方常用尺寸 + 离请求最近的那一个
+    const official = d.official ? `<div class="mt-1"><span class="hint">OpenAI 官方常用尺寸：</span>
+        ${d.official.map(o => `<span class="chip mono" style="cursor:pointer" onclick="act.fillSize('${o.size}')">${o.size}${o.label ? ' <span class="hint">' + o.label + '</span>' : ''}</span>`).join(' ')}</div>
+      <div class="hint">离你这次请求最近的官方尺寸：<b class="mono">${esc(d.nearest_official.size)}</b> ${esc(d.nearest_official.label || '')}</div>` : '';
     $('#spOut').innerHTML = `<div class="kvline">${pill(d.changed ? 'warn' : 'ok', d.changed ? '会被换算' : '原样透传')}
         <span class="mono">${esc(d.size)}</span> <i class="ti ti-arrow-right"></i> <b class="mono">${esc(d.final)}</b>
-        ${d.tier ? pill('info', `${esc(d.ratio)} · ${esc(d.tier)}`) : ''}</div>
+        ${d.tier ? pill('info', `${esc(d.ratio)} · ${esc(d.tier)}${d.tokens ? ' · ' + d.tokens + ' tokens' : ''}`) : ''}
+        ${d.mode === 'passthrough' ? pill('warn', '该渠道已关闭吸附') : ''}</div>
       <div class="hint mt-1">${esc(d.note || '')}</div>
-      ${d.rules ? `<div class="hint">GPT 自由尺寸规则：宽高均为 16 的倍数 · 长短边比 ≤ 3:1 · 任一边 ≤ 3840 · 总像素 655,360~8,294,400（出处：Azure OpenAI《GPT image models》）；> 2560x1440 属实验档。</div>` : ''}
+      ${tierTable}
+      ${official}
+      ${d.rules ? `<div class="hint">GPT 自由尺寸规则：宽高均为 16 的倍数 · 长短边比 ≤ 3:1 · 任一边 ≤ 3840 · 总像素 655,360~8,294,400（出处：OpenAI《Image generation》/ Azure OpenAI《GPT image models》）；官方 4K = <b>3840x2160</b>（不是 4096x4096，边长上限就是 3840，所以方形最大 2880x2880）；> 2560x1440 属实验档。</div>` : ''}
+      ${d.source ? `<div class="hint">${esc(d.source)}</div>` : ''}
       ${d.allowed ? `<div class="hint">该模型只接受：${d.allowed.map(x => `<span class="chip mono">${x}</span>`).join(' ')}</div>` : ''}`;
   },
 
