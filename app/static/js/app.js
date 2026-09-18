@@ -531,6 +531,10 @@ const act = {
           ${(p.key_groups || []).length ? `<div class="k mt-2">密钥分组（模型 → 用哪一组）</div>
             <div class="row">${(p.key_groups || []).map(g => `<span class="chip">${esc(g.label)} · ${g.keys} 把${g.models.length ? ' · ' + g.models.length + ' 个模型' : ''}</span>`).join(' ')}</div>
             ${(p.key_groups || []).filter(g => g.models.length).map(g => `<div class="hint">${esc(g.label)}：${g.models.map(m => `<span class="chip mono">${esc(m)}</span>`).join(' ')}</div>`).join('')}` : ''}
+          <div class="k mt-1">参考图形态</div>
+          <div>${esc(((p.options || {}).ref_prefer === 'inline' ? '强制内联 base64（不上传）'
+            : ((p.options || {}).ref_prefer === 'url' ? '强制转公网直链（走图床）'
+            : '按插件口径（' + ((state.plugins || []).find(x => x.id === p.protocol)?.ref_input_note || '—') + '）')))}</div>
           <div class="k mt-2">插件选项 options</div>
           <pre class="json">${esc(JSON.stringify(p.options || {}, null, 2))}</pre>
         </td></tr>`;
@@ -871,6 +875,11 @@ const act = {
           <label class="form-label">权重<span class="hint"> 同优先级内按权重分流</span></label><input class="form-control mb-3" id="fWeight" type="number" min="1" value="${p?.weight ?? 1}">
           <label class="form-label">并发上限<span class="hint"> 该渠道同时最多跑几个请求，0=不限</span></label><input class="form-control mb-3" id="fConc" type="number" min="0" value="${(p?.options || {}).max_concurrency || 0}">
           <label class="form-label">同档重试<span class="hint"> 失败先在本优先级重试几次再降档，0=直接降档</span></label><input class="form-control mb-3" id="fRetry" type="number" min="0" max="2" value="${(p?.options || {}).retry || 0}">
+          <label class="form-label">参考图形态<span class="hint"> 默认=按插件声明的渠道口径；上游口径变了可以在这里强制</span></label>
+          <select class="form-select mb-3" id="fRefPref">
+            ${[['', '按插件默认（推荐）'], ['url', '强制转公网直链（走图床）'], ['inline', '强制内联 base64（不上传）']]
+              .map(([v, t]) => `<option value="${v}" ${(((p?.options || {}).ref_prefer) || '') === v ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
           <label class="form-label">尺寸处理<span class="hint"> 客户端传的尺寸怎么发给上游</span></label><select class="form-select mb-3" id="fSizeMode">
             ${[['snap','按官方约束吸附（默认）'],['passthrough','原样透传（一个像素都不改）']].map(([v, t]) =>
               `<option value="${v}" ${(((p?.options || {}).size_mode) || 'snap') === v ? 'selected' : ''}>${t}</option>`).join('')}
@@ -1170,6 +1179,8 @@ const act = {
     if (gp && gp !== 'class') options.gemini_size_policy = gp; else delete options.gemini_size_policy;
     const sm = $('#fSizeMode') ? $('#fSizeMode').value : 'snap';            // 尺寸处理方式
     if (sm === 'passthrough') options.size_mode = sm; else delete options.size_mode;
+    const rp = $('#fRefPref') ? $('#fRefPref').value : '';                  // 参考图形态（应急阀门）
+    if (rp) options.ref_prefer = rp; else delete options.ref_prefer;
     const body = {key, label: $('#fLabel').value.trim() || key, protocol: $('#fProto').value,
       base_url: $('#fBase').value.trim(), auth_mode: $('#fAuth').value, model_map, options,
       priority: parseInt($('#fPrio').value || '0', 10), weight: Math.max(1, parseInt($('#fWeight').value || '1', 10)),
