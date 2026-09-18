@@ -483,7 +483,9 @@ const act = {
           <td><input class="pinp" type="number" min="1" value="${p.weight || 1}" title="同优先级内按权重分流（1:3 就是三倍流量）"
                 onclick="event.stopPropagation()" onchange="act.providerWeight('${esc(p.key)}', this.value)"></td>
           <td><span class="chip">${(p.models || []).length} 个</span>${aliased ? ` <span class="chip warn">${aliased} 条映射</span>` : ''}</td>
-          <td>${keys.length ? `<span class="chip">${keys.length} 把</span> <span class="hint mono">${esc(keys[0].masked)}</span>` : pill('err', '未配置')}</td>
+          <td>${keys.length ? `<span class="chip">${keys.length} 把</span>` +
+              ((p.key_groups || []).some(g => g.labeled) ? ` <span class="chip info">${(p.key_groups || []).filter(g => g.labeled).length} 组</span>` : '') +
+              ` <span class="hint mono">${esc(keys[0].masked)}</span>` : pill('err', '未配置')}</td>
           <td>${healthPill(h.ok)}<div class="hint">${h.ts ? timeAgo(h.ts) : '未探测'}</div></td>
           <td class="num">${(p.stats && p.stats.n) || 0}<div class="hint">成功 ${(p.stats && p.stats.ok) || 0} · 均 ${fmtMs(p.stats && p.stats.avg_ms)}</div></td>
           <td class="acts" onclick="event.stopPropagation()">
@@ -512,8 +514,11 @@ const act = {
           </div>
           <div class="k mt-2">模型（客户端名 → 上游真名）</div>
           <div class="row">${(p.models || []).map(m => `<span class="chip mono">${esc(m.id)}${m.aliased ? ' → ' + esc(m.upstream) : ''}</span>`).join(' ') || '<span class="hint">未配置模型</span>'}</div>
-          <div class="k mt-2">密钥池（换行分隔即多把，失败自动轮换 + 冷却）</div>
-          <div class="row">${keys.map(k => `<span class="chip mono">#${k.index} ${esc(k.masked)}</span>`).join(' ') || '<span class="hint">未配置</span>'}</div>
+          <div class="k mt-2">密钥池（换行分隔即多把；<b>分组标签::密钥</b> 可按上游分组区分，失败自动轮换 + 冷却）</div>
+          <div class="row">${keys.map(k => `<span class="chip mono">${k.label ? `<b>${esc(k.label)}</b>::` : ''}#${k.index} ${esc(k.masked)}</span>`).join(' ') || '<span class="hint">未配置</span>'}</div>
+          ${(p.key_groups || []).length ? `<div class="k mt-2">密钥分组（模型 → 用哪一组）</div>
+            <div class="row">${(p.key_groups || []).map(g => `<span class="chip">${esc(g.label)} · ${g.keys} 把${g.models.length ? ' · ' + g.models.length + ' 个模型' : ''}</span>`).join(' ')}</div>
+            ${(p.key_groups || []).filter(g => g.models.length).map(g => `<div class="hint">${esc(g.label)}：${g.models.map(m => `<span class="chip mono">${esc(m)}</span>`).join(' ')}</div>`).join('')}` : ''}
           <div class="k mt-2">插件选项 options</div>
           <pre class="json">${esc(JSON.stringify(p.options || {}, null, 2))}</pre>
         </td></tr>`;
@@ -772,9 +777,18 @@ const act = {
           ${['bearer','x-goog-api-key','fal_key'].map(a => `<option ${p?.auth_mode === a ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
         <div class="col-12"><label class="form-label">上游 base_url</label>
           <input class="form-control" id="fBase" value="${esc(p?.base_url || '')}" placeholder="https://api.qnaigc.com"></div>
-        <div class="col-12"><label class="form-label">API key（多把 key 每行一个，自动轮换）</label>
-          <textarea class="form-control" id="fKeys" placeholder="sk-xxxx&#10;sk-yyyy"></textarea>
-          <div class="hint mt-1">${p ? '留空则不改动现有 key；当前：' + (p.keys||[]).map(k => k.masked).join(' / ') : ''}</div></div>
+        <div class="col-12">
+          <div class="d-flex align-items-center justify-content-between mb-1" style="gap:8px;flex-wrap:wrap">
+            <label class="form-label mb-0">API key（多把 key 每行一个，自动轮换）</label>
+            <div class="acts">
+              <button class="btn btn-sm btn-outline-secondary" onclick="act.discoverGroups()"><i class="ti ti-key"></i> 探测各密钥分组</button>
+            </div>
+          </div>
+          <textarea class="form-control" id="fKeys" placeholder="gemini::sk-xxxx&#10;gpt::sk-yyyy&#10;（没写标签的行＝通吃任何模型）"></textarea>
+          <div class="hint mt-1">sub2api 系上游的 key 是<b>绑分组</b>的（gemini 与 gpt 常常不同组），写法 <code>分组标签::密钥</code>，
+            路由会按模型自动挑对应分组的 key（同一渠道内多组并存，不用拆渠道）。没写标签的行＝通吃。
+            ${p ? '留空则不改动现有 key；当前：' + (p.keys||[]).map(k => (k.label ? k.label + '::' : '') + k.masked).join(' / ') : ''}</div>
+          <div id="grpOut" class="mt-2"></div></div>
         <div class="col-12">
           <div class="d-flex align-items-center justify-content-between mb-1" style="gap:8px;flex-wrap:wrap">
             <label class="form-label mb-0">模型映射（JSON：{"客户端模型名": "上游真实名"}）</label>
@@ -789,7 +803,7 @@ const act = {
         </div>
         <div class="col-md-8"><label class="form-label">渠道微调 options（JSON，可选）</label>
           <textarea class="form-control" id="fOptions">${esc(JSON.stringify(p?.options || {}, null, 2))}</textarea>
-          <div class="hint mt-1">drop_fields（支持点号路径，如 <code>generationConfig.thinkingConfig</code>）/ force_fields / generations_path / edits_path / image_size_override / drop_quality / gemini_size_policy（class|floor|nearest|ceil）/ size_mode（snap|passthrough）</div></div>
+          <div class="hint mt-1">drop_fields（支持点号路径，如 <code>generationConfig.thinkingConfig</code>）/ force_fields / generations_path / edits_path / image_size_override / drop_quality / gemini_size_policy（class|floor|nearest|ceil）/ size_mode（snap|passthrough）/ key_groups（模型→分组规则，如 {"gemini-*": "gemini"}，优先级高于自动探测结果）</div></div>
         <div class="col-md-4">
           <label class="form-label">优先级<span class="hint"> 数字大者优先</span></label><input class="form-control mb-3" id="fPrio" type="number" value="${p?.priority ?? 0}">
           <label class="form-label">权重<span class="hint"> 同优先级内按权重分流</span></label><input class="form-control mb-3" id="fWeight" type="number" min="1" value="${p?.weight ?? 1}">
@@ -811,6 +825,25 @@ const act = {
       </div>`,
       `<button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
        <button class="btn btn-primary" onclick="act.providerSave('${esc(key || '')}')">保存</button>`);
+  },
+
+  /* -------------------- 密钥分组：探测每把 key 属于哪个分组（零成本 GET /v1/models） -------------------- */
+
+  async discoverGroups() {
+    const key = ($('#fKey').value || '').trim();
+    if (!key) return toast('先填实例名并保存一次，再探测分组', true);
+    $('#grpOut').innerHTML = '<span class="hint">正在逐把读取上游 /v1/models（只读、零成本，不出图）…</span>';
+    const r = await api(`/api/providers/${encodeURIComponent(key)}/discover-groups`, {method: 'POST'});
+    if (!r) return;
+    const d = r.data || {};
+    const gs = Object.entries(d.groups || {});
+    $('#grpOut').innerHTML = `<div class="panel" style="box-shadow:none;margin:0"><div class="body tight">
+        <div class="k">密钥分组（已写入 options.key_models，路由会按模型自动挑 key）</div>
+        ${gs.map(([label, models]) => `<div class="kvline"><span class="chip mono">${esc(label)}</span>
+            ${models.map(m => `<span class="chip mono">${esc(m)}</span>`).join(' ')}</div>`).join('') || '<span class="hint">没读到任何分组</span>'}
+        ${Object.keys(d.errors || {}).length ? `<div class="hint t-err">失败：${esc(JSON.stringify(d.errors))}</div>` : ''}
+      </div></div>`;
+    toast('分组已更新，保存渠道后生效');
   },
 
   /* -------------------- 模型映射：拉取上游模型列表（零成本 GET） -------------------- */

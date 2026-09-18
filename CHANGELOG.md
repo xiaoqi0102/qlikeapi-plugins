@@ -13,6 +13,41 @@
 - 价格页支持批量导入/导出（CSV）
 - 渠道实例分组与标签筛选
 
+## [3.8.0] - 2026-09-18
+
+### 背景（用户反馈 + 实测确认）
+
+**sub2api 系上游的密钥是「绑分组」的** —— 和 New API 不一样：一个渠道里不能混放不同分组的模型。
+实测 change2pro：key#1 的 `GET /v1/models` 只回 4 个 gemini 模型，key#2 只回 `gpt-image-2`；
+gemini 与 gpt 不在同一分组。之前把两把 key 不加区分地放在同一渠道，轮询会把 gemini 请求打到 gpt 组的 key 上，
+上游回 `404 model_not_found`（日志实证 3 次），白白多一跳才降级。
+
+### Added
+
+- **同一渠道内的「多分组密钥」**（不拆渠道）：
+  - 密钥池写法升级为 **`分组标签::密钥`**（一行一把，保持书写顺序）；没写标签的行＝通吃；
+  - `options.key_groups`：手写「模型 → 分组」规则（支持 `*` `?` 通配），优先级最高；
+  - `options.key_models`：「探测各密钥分组」的自动结果；
+  - 路由按请求模型挑**对应分组**的密钥，轮换与失败冷却都在分组内进行；
+    规则没命中且没有通吃 key 时**退化成全部 key**（绝不因配置不全而断路）。
+- **`POST /api/providers/{key}/discover-groups`**：逐把 `GET /v1/models` 读出「这把 key 属于哪个分组、
+  能用哪些模型」——**零成本、只读、绝不出图**，结果写入 `options.key_models`。
+- **`POST /api/providers/{key}/fetch-models?group=<分组>`**：可按指定分组的密钥去拉模型列表。
+- 面板渠道弹窗新增「**探测各密钥分组**」按钮与结果展示；密钥池、分组汇总（标签/把数/模型）
+  在渠道列表与展开行里都能看到（**只回掩码与分组标签，绝不回密钥内容**）。
+- `/api/providers` 每把 key 增加 `label` 字段，并新增 `key_groups` 汇总；`/v1/route-preview` 也带出 `key_groups`。
+
+### Changed
+
+- `store.provider_keys()` 会剥掉分组标签；新增 `store.key_entries()` 返回 `{idx, label, key}`，
+  密钥冷却按 `idx`（渠道内稳定序号）记账，加/删其它 key 不影响既有冷却。
+
+### Tests
+
+- 新增 `tests/test_key_groups.py`（10 个用例）：标签解析、显式规则/自动探测解析、分组内挑 key 与逐级退让、
+  真调用按分组选 key（断言发出去的 `Authorization`）、探测接口落库与错误上报、密钥内容不外泄。
+- 全量 **290 passed**，`ruff` 干净。
+
 ## [3.7.0] - 2026-09-18
 
 ### 口径复核（两条反馈都对照官方原文核过）

@@ -140,11 +140,17 @@ curl -s -X POST "http://127.0.0.1:18673/up/change2pro/v1/images/preview" \
 |---|---|---|
 | GET | `/api/channels` | 已装载的渠道插件（含 `operations`、预置模型） |
 | POST | `/api/channels/reload` | 热重载插件目录（加插件后不用重启） |
-| GET | `/api/providers` | 渠道实例列表（密钥只回 `{"index","masked"}`） |
+| GET | `/api/providers` | 渠道实例列表（密钥只回 `{"index","masked","label"}`；另带 `key_groups` 分组汇总：标签/把数/已知模型） |
 | POST | `/api/providers` | 新建/更新实例（密钥会加密入库） |
 | POST | `/api/providers/{key}/patch` | 轻量改：`enabled` / `priority` / `weight`（即时生效） |
 | DELETE | `/api/providers/{key}` | 删除实例 |
 | POST | `/api/providers/{key}/test?model=<模型>` | 零成本探活，返回逐模型结果 |
+| POST | `/api/providers/{key}/fetch-models?group=<分组>` | 拉取上游模型列表（零成本 `GET /v1/models`）；带 `group` 则用该分组的密钥去拉 |
+| POST | `/api/providers/{key}/discover-groups` | **探测各密钥分组**（零成本：逐把 `GET /v1/models`），把「分组 → 可用模型」写进 `options.key_models`，返回 `{ok, groups, errors}` |
+
+密钥池写法：`api_key` 按行分隔，一行一把；行内支持 **`分组标签::密钥`**（sub2api 系上游的 key 绑分组，
+gemini 与 gpt 常常不同组）—— 同一个渠道里放多组密钥，路由按模型自动挑对应分组（`options.key_groups` 手写规则，
+`options.key_models` 为自动探测结果），详见 [CONFIGURATION.md](CONFIGURATION.md)。
 
 `GET /api/providers` 单行结构（节选）：
 
@@ -155,7 +161,9 @@ curl -s -X POST "http://127.0.0.1:18673/up/change2pro/v1/images/preview" \
   "cooldown_until":null,"site_id":null,
   "models":[{"id":"gpt-image-2","upstream":"openai/gpt-image-2","aliased":true}],
   "operations":[{"operation":"generate","mode":"converted"}],
-  "keys":[{"index":0,"masked":"sk-a3e…91cb"}]}]
+  "keys":[{"index":0,"masked":"sk-a3e…91cb","label":"gemini"},{"index":1,"masked":"sk-645…7e0f","label":"gpt"}],
+  "key_groups":[{"label":"gemini","keys":1,"models":["gemini-3.1-flash-image","gemini-3-pro-image"],"labeled":true},
+                {"label":"gpt","keys":1,"models":["gpt-image-2"],"labeled":true}]}]
 ```
 
 ### 路由
@@ -216,7 +224,7 @@ curl -s -X POST "http://127.0.0.1:18673/up/change2pro/v1/images/preview" \
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/healthz` | `{"ok":true,"app":"qlikeapi-plugins","version":"3.7.0","plugins":[…],"plugin_errors":{},"providers":[…]}` |
+| GET | `/healthz` | `{"ok":true,"app":"qlikeapi-plugins","version":"3.8.0","plugins":[…],"plugin_errors":{},"providers":[…]}` |
 | GET | `/` | 控制台页面（未登录跳 `/login`） |
 | GET | `/static/*` | 前端静态资源 |
 

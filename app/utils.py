@@ -72,6 +72,35 @@ GEMINI_SIZES = {
 }
 
 
+# ---------------------------------------------------------------- 渠道密钥行（支持分组标签）
+# sub2api 系上游按「分组 + 密钥」区分可用模型（gemini 与 gpt 常常不在同一分组），
+# 所以同一个渠道里可以放多把不同分组的 key，写法：`分组标签::密钥`（一行一把）。
+# 没写标签的行 = 通吃（任何模型都能用）。
+KEY_LABEL_SEP = "::"
+
+
+def parse_key_lines(raw: Any) -> list[dict]:
+    """把 api_key 文本解析成 [{'label': 标签或 None, 'key': 密钥}]（保持书写顺序）。"""
+    out: list[dict] = []
+    for line in str(raw or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        label, key = None, line
+        if KEY_LABEL_SEP in line:
+            head, _, tail = line.partition(KEY_LABEL_SEP)
+            if head.strip() and tail.strip():
+                label, key = head.strip(), tail.strip()
+        out.append({"label": label, "key": key})
+    return out
+
+
+def glob_match(pattern: str, text: str) -> bool:
+    """极简通配匹配（只支持 * 与 ?，大小写不敏感），用于 options.key_groups 的模型→分组规则。"""
+    rx = "^" + re.escape(str(pattern)).replace(r"\*", ".*").replace(r"\?", ".") + "$"
+    return re.match(rx, str(text).lower()) is not None
+
+
 def parse_size(size: Any) -> tuple[int, int] | None:
     if isinstance(size, (list, tuple)) and len(size) == 2:
         try:

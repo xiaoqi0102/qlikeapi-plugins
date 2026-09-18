@@ -236,7 +236,8 @@ def test_providers_list_shape(client, login, make_provider):
     row = client.get("/api/providers").json()[0]
     assert row["key"] == "p1" and row["plugin_ok"] is True
     assert row["plugin_label"] and row["priority"] == 10
-    assert row["keys"] == [{"index": 0, "masked": store.mask("sk-test-key-000")}]
+    assert row["keys"] == [{"index": 0, "masked": store.mask("sk-test-000"), "label": None}]
+    assert row["key_groups"] == [{"label": "（未分组）", "keys": 1, "models": [], "labeled": False}]
     assert row["models"][0]["id"] == "gpt-image-2"
 
 

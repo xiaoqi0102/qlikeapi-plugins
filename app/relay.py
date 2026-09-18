@@ -185,18 +185,20 @@ def _guard_scope(access: dict, model: str, provider: str = ""):
 
 # ------------------------------------------------------------------ key 轮换
 
-def _next_key(provider: str, keys: list[str], tried: set[int]) -> tuple[int, str] | None:
+def _next_key(provider: str, entries: list[dict], tried: set[int]) -> dict | None:
+    """在「该模型可用的密钥条目」里轮换挑一把（冷却按条目的稳定 idx 记账）。"""
     st = _KEY_STATE.setdefault(provider, {"idx": 0, "cooldown": {}})
     now = time.time()
-    n = len(keys)
+    n = len(entries)
     for _ in range(n):
         i = st["idx"] % n
         st["idx"] = (i + 1) % n
-        if i in tried:
+        e = entries[i]
+        if e["idx"] in tried:
             continue
-        if st["cooldown"].get(i, 0) > now:
+        if st["cooldown"].get(e["idx"], 0) > now:
             continue
-        return i, keys[i]
+        return e
     return None
 
 
@@ -335,18 +337,20 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
                           token=tk_name, token_id=tk_id)
         return JSONResponse({"error": {"message": str(e), "type": "invalid_request_error"}}, status_code=400), {"ms": 0}
 
-    keys = store.provider_keys(p)
-    if not keys:
+    # 按分组挑密钥：sub2api 系上游的 key 是绑分组的（gemini / gpt 常常不同组），
+    # 所以这里先按模型算出该用哪一组，再在该组内轮换（挑不出来时逐级退让，见 protocols.pick_keys）。
+    entries = protocols.pick_keys(p, body.get("model"), (meta or {}).get("up_model"))
+    if not entries:
         return JSONResponse({"error": {"message": f"渠道 '{provider}' 未配置 API key",
                                        "type": "invalid_request_error"}}, status_code=503), {"ms": 0}
 
     tried: set[int] = set()
     last: tuple[int, str] | None = None
     for attempt in range(1, MAX_KEY_ATTEMPTS + 1):
-        pick = _next_key(provider, keys, tried)
+        pick = _next_key(provider, entries, tried)
         if not pick:
             break
-        idx, secret = pick
+        idx, secret = pick["idx"], pick["key"]
         tried.add(idx)
         headers = protocols.auth_headers(p.get("auth_mode") or "bearer", secret)
         try:
@@ -791,18 +795,19 @@ def selftest_provider(p: dict, model: str | None = None) -> dict:
     if p.get("protocol") == "openai_images":
         body["response_format"] = "b64_json"
     try:
-        url, up_body, _ = prepare(p, body, False)
+        url, up_body, meta = prepare(p, body, False)
     except Exception as e:
         res = {"ok": False, "model": m, "error": repr(e)}
         _log_probe(p, m, url="", res=res)
         return res
     up_body = blank_for_probe(up_body)          # ← 安全底线：任何插件都不可能漏
-    keys = store.provider_keys(p)
-    if not keys:
+    entries = protocols.pick_keys(p, m, (meta or {}).get("up_model"))
+    if not entries:
         res = {"ok": False, "model": m, "error": "no api key"}
         _log_probe(p, m, url, res, up_body=up_body)
         return res
-    headers = protocols.auth_headers(p.get("auth_mode") or "bearer", keys[0])
+    secret = entries[0]["key"]
+    headers = protocols.auth_headers(p.get("auth_mode") or "bearer", secret)
     t0 = time.time()
     try:
         status, up_json, up_text = protocols.call_upstream(url, headers, up_body, timeout=PROBE_TIMEOUT)
@@ -813,7 +818,7 @@ def selftest_provider(p: dict, model: str | None = None) -> dict:
                "timeout": timeout,
                "error": ("探活超时（%ds 内上游没回应，说明这条链路上该模型名/路径不被接受或上游挂起）" % int(PROBE_TIMEOUT))
                         if timeout else repr(e)}
-        _log_probe(p, m, url, res, ms, up_body=up_body)
+        _log_probe(p, m, url, res, ms, up_body=up_body, secret=secret)
         return res
     msg = up_text[:600]
     if isinstance(up_json, dict):
@@ -822,21 +827,22 @@ def selftest_provider(p: dict, model: str | None = None) -> dict:
     res = {"ok": reachable, "reachable": reachable, "model": m, "url": url, "upstream_status": status,
            "ms": int((time.time() - t0) * 1000), "upstream_message": msg,
            "note": "已清空 prompt 的探活：4xx = 链路/鉴权/模型名都通（上游只是拒绝了空请求）；5xx = 上游异常；超时 = 上游挂起。零成本"}
-    _log_probe(p, m, url, res, up_body=up_body)
+    _log_probe(p, m, url, res, up_body=up_body, secret=secret)
     return res
 
 
 def _log_probe(p: dict, model: str, url: str, res: dict, ms: int | None = None,
-               up_body: dict | None = None) -> None:
+               up_body: dict | None = None, secret: str | None = None) -> None:
     """探活也写进请求日志（类型=探活），便于和「真调用」对账。
 
     和真调用一样记完整请求（URL / 方法 / 请求头占位），这样日志详情里的 curl 对探活也可用。
     """
     red = None
     try:
-        ks = store.provider_keys(p)
-        if ks:
-            red = _redact_headers(protocols.auth_headers(p.get("auth_mode") or "bearer", ks[0]), ks[0])
+        ent = ([{"key": secret}] if secret else protocols.pick_keys(p, model)) or []
+        if ent:
+            red = _redact_headers(protocols.auth_headers(p.get("auth_mode") or "bearer", ent[0]["key"]),
+                                  ent[0]["key"])
     except Exception:
         red = None
     try:
@@ -904,5 +910,6 @@ def v1_route_preview(request: Request, model: str):
             "rule": "explicit" if explicit else "auto(按优先级)",
             "chain": [{"provider": p["key"], "label": p["label"], "priority": p.get("priority") or 0,
                        "plugin": p.get("protocol"), "url": p.get("base_url"),
-                       "keys": len(store.provider_keys(p))} for p in chain],
+                       "keys": len(store.provider_keys(p)),
+                       "key_groups": sorted({e.get("label") or "（未分组）" for e in store.key_entries(p)})} for p in chain],
             "note": "这是路由顺序；实际会从第一个开始，遇到上游不可用（429/5xx/超时/连不上）自动换下一个"}

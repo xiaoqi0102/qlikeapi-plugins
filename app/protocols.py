@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from . import utils
+from . import store, utils
 
 TIMEOUT = float(os.environ.get("QLIKEAPI_TIMEOUT", "900"))
 POLL_INTERVAL = float(os.environ.get("QLIKEAPI_POLL_INTERVAL", "3"))
@@ -285,6 +285,90 @@ def gemini_policy(p: dict) -> str:
     """
     v = str((p.get("options") or {}).get("gemini_size_policy") or "class").lower()
     return v if v in ("class", "ceil", "floor", "nearest") else "class"
+
+
+def discover_key_groups(p: dict, timeout: float = 20.0) -> dict:
+    """零成本探测每把密钥的分组：逐把 GET 上游 /v1/models，拿到「这把 key 能用哪些模型」。
+
+    只读接口，不发任何生成请求（sub2api 的 /v1/models 就是按 key 的分组返回可用模型的）。
+    返回 {"groups": {标签: [模型…]}, "errors": {标签: 错误}, "plain": [无标签 key 的模型…]}
+    """
+    groups: dict[str, list[str]] = {}
+    errors: dict[str, str] = {}
+    plain: list[str] = []
+    path_hint = str((p.get("options") or {}).get("models_path") or "").strip()
+    paths = [path_hint] if path_hint else ["/v1/models", "/models"]
+    for e in store.key_entries(p):
+        label = e.get("label") or f"#{e['idx'] + 1}"
+        ids: list[str] = []
+        errs: list[str] = []
+        for path in paths:
+            url = p["base_url"].rstrip("/") + path
+            try:
+                headers = auth_headers(p.get("auth_mode") or "bearer", e["key"])
+                r = httpx.get(url, headers=headers, timeout=timeout)
+            except Exception as ex:                     # 连不上/超时
+                errs.append(f"{path}: {type(ex).__name__}")
+                continue
+            if r.status_code >= 400:
+                errs.append(f"{path}: HTTP {r.status_code} {(r.text or '')[:80]}")
+                continue
+            try:
+                j = r.json()
+            except Exception:
+                errs.append(f"{path}: 非 JSON")
+                continue
+            items = j.get("data") if isinstance(j, dict) else None
+            if not isinstance(items, list):
+                items = (j.get("models") if isinstance(j, dict) else None) or []
+            for it in items:
+                mid = it.get("id") or it.get("name") if isinstance(it, dict) else str(it)
+                if mid and str(mid) not in ids:
+                    ids.append(str(mid))
+            if ids:
+                break
+        if ids:
+            groups[label] = ids
+            if not e.get("label"):
+                plain = ids
+        elif errs:
+            errors[label] = "；".join(errs)[:200]
+    return {"groups": groups, "errors": errors, "plain": plain}
+
+
+def key_group(p: dict, model: str | None, up_model: str | None = None) -> str | None:
+    """这个模型该用哪个分组标签的密钥（None = 不限分组）。
+
+    解析顺序：
+      ① options.key_groups —— 手写规则，`{"gemini-*": "gemini", "gpt-image-2": "gpt"}`（支持 * ? 通配）；
+      ② options.key_models —— 「探测各密钥分组」自动发现的结果，`{"gemini": ["gemini-3.1-flash-image", ...]}`；
+      ③ 都没命中 → None（用没写标签的 key；再没有就退化成所有 key，与旧行为一致）。
+    """
+    opts = p.get("options") or {}
+    names = [str(x).lower() for x in (model, up_model) if x]
+    for pat, label in (opts.get("key_groups") or {}).items():
+        if any(utils.glob_match(pat, n) for n in names):
+            return str(label)
+    for label, models in (opts.get("key_models") or {}).items():
+        ids = [str(m).lower() for m in (models or [])]
+        for n in names:
+            if n in ids or any(utils.glob_match(i, n) for i in ids):
+                return str(label)
+    return None
+
+
+def pick_keys(p: dict, model: str | None = None, up_model: str | None = None) -> list[dict]:
+    """按分组挑出该模型可用的密钥条目（保持顺序）。挑不出来时逐级退让，绝不因配置不全而断路。"""
+    entries = store.key_entries(p)
+    if not entries:
+        return []
+    label = key_group(p, model, up_model)
+    if label:
+        hit = [e for e in entries if e.get("label") == label]
+        if hit:
+            return hit
+    plain = [e for e in entries if not e.get("label")]
+    return plain or entries
 
 
 def size_mode(p: dict) -> str:

@@ -141,6 +141,23 @@ def api_channels_reload(request: Request):
 
 # ------------------------------------------------------------------ 渠道实例
 
+def _key_groups_of(p: dict) -> list[dict]:
+    """渠道的密钥分组汇总（只回标签/数量/已知模型，绝不回密钥内容）。"""
+    opts = p.get("options") or {}
+    discovered = opts.get("key_models") or {}
+    out: dict[str, dict] = {}
+    for e in store.key_entries(p):
+        label = e.get("label") or "（未分组）"
+        g = out.setdefault(label, {"label": label, "keys": 0, "models": [], "labeled": bool(e.get("label"))})
+        g["keys"] += 1
+        if not g["models"] and label in discovered:
+            g["models"] = list(discovered[label])
+    for label, models in discovered.items():
+        if label not in out:
+            out[label] = {"label": label, "keys": 0, "models": list(models), "labeled": True}
+    return sorted(out.values(), key=lambda x: (not x["labeled"], x["label"]))
+
+
 @router.get("/providers")
 def api_providers(request: Request):
     u, err = need_user(request)
@@ -150,7 +167,6 @@ def api_providers(request: Request):
     for prow in store.list_providers():
         p = store.get_provider(prow["key"]) or prow      # 要统计密钥数量，这里带密钥读取（只回掩码）
         ch = channels.get(p.get("protocol") or "")
-        keys = store.provider_keys(p)
         stats = store.one("""SELECT COUNT(*) n, SUM(CASE WHEN http_status<400 THEN 1 ELSE 0 END) ok,
                                     AVG(ms) avg_ms, MAX(ts) last_ts FROM logs
                              WHERE kind='relay' AND provider=?""", (p["key"],)) or {}
@@ -168,7 +184,9 @@ def api_providers(request: Request):
             "site_name": (store.get_site(int(p["site_id"])) or {}).get("name") if p.get("site_id") else None,
             "models": protocols.model_list(p),
             "operations": ch.info()["operations"] if ch else [],
-            "keys": [{"index": i, "masked": store.mask(k)} for i, k in enumerate(keys)],
+            "keys": [{"index": e["idx"], "masked": store.mask(e["key"]), "label": e.get("label")}
+                     for e in store.key_entries(p)],
+            "key_groups": _key_groups_of(p),
             "health": store.one("SELECT * FROM health WHERE provider=?", (p["key"],)),
             "stats": stats,
             "endpoint": f"/up/{p['key']}",
@@ -300,6 +318,37 @@ def api_provider_test(key: str, request: Request, model: str = ""):
     return res
 
 
+@router.post("/providers/{key}/discover-groups")
+def api_provider_discover_groups(key: str, request: Request):
+    """探测「每把密钥属于哪个分组、能用哪些模型」——零成本：逐把 GET 上游 /v1/models，绝不出图。
+
+    sub2api 系上游按「分组 + 密钥」区分可用模型（gemini 与 gpt 常常不在同一分组），
+    这个接口就是把这些分组自动读出来，写进渠道 options.key_models，
+    之后路由会按模型自动挑对应分组的 key（也可用 options.key_groups 手写规则覆盖）。
+    """
+    u, err = need_user(request)
+    if err:
+        return err
+    p = store.get_provider(key)
+    if not p:
+        return JSONResponse({"error": f"渠道 '{key}' 不存在"}, status_code=404)
+    if not store.key_entries(p):
+        return JSONResponse({"error": "这个渠道还没配 API key，先填 key 并保存"}, status_code=400)
+    res = protocols.discover_key_groups(p)
+    if not res["groups"]:
+        return JSONResponse({"error": "所有密钥都没读到模型列表：" +
+                                      json.dumps(res["errors"], ensure_ascii=False)[:300]}, status_code=400)
+    opts = dict(p.get("options") or {})
+    opts["key_models"] = res["groups"]
+    opts["key_models_at"] = int(time.time())
+    with store.connect() as c:
+        c.execute("UPDATE providers SET options=?, updated_at=? WHERE key=?",
+                  (json.dumps(opts, ensure_ascii=False), int(time.time()), key))
+    return {"ok": True, "provider": key, "groups": res["groups"], "errors": res["errors"],
+            "note": "已写入 options.key_models；路由会按模型自动挑对应分组的密钥（"
+                    "想手写规则可用 options.key_groups，如 {'gemini-*': 'gemini'}）"}
+
+
 @router.post("/providers/{key}/fetch-models")
 def api_provider_fetch_models(key: str, request: Request):
     """拉取上游模型列表（零成本：只发一个 GET /v1/models，绝不出图）。
@@ -317,7 +366,9 @@ def api_provider_fetch_models(key: str, request: Request):
     keys = store.provider_keys(p)
     if not keys:
         return JSONResponse({"error": "这个渠道还没配 API key，先填 key 并保存"}, status_code=400)
-    res = protocols.fetch_upstream_models(p, key=keys[0])
+    group = (request.query_params.get("group") or "").strip()
+    picked = [e for e in store.key_entries(p) if group and e.get("label") == group] or store.key_entries(p)
+    res = protocols.fetch_upstream_models(p, key=picked[0]["key"] if picked else keys[0])
     if not res.get("ok"):
         return JSONResponse({"error": res.get("error") or "拉取失败"}, status_code=400)
     res["existing"] = list((p.get("model_map") or {}).keys())

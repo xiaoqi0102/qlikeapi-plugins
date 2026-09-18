@@ -218,9 +218,18 @@ def list_providers(only_enabled: bool = False) -> list[dict]:
 
 
 def provider_keys(p: dict) -> list[str]:
-    """渠道实例的 key 列表（换行分隔，保持顺序）。"""
-    raw = p.get("api_key") or ""
-    return [k.strip() for k in raw.splitlines() if k.strip()]
+    """渠道实例的 key 列表（换行分隔，保持顺序；分组标签会被剥掉）。"""
+    return [e["key"] for e in key_entries(p)]
+
+
+def key_entries(p: dict) -> list[dict]:
+    """渠道实例的密钥条目：[{'idx': 序号, 'label': 分组标签或 None, 'key': 明文}]。
+
+    `idx` 是「在渠道内的稳定序号」，key 冷却（cooldown）按它记账，因此加/删别的 key 不影响。
+    """
+    from . import utils
+
+    return [{"idx": i, **e} for i, e in enumerate(utils.parse_key_lines(p.get("api_key") or ""))]
 
 
 def log_row(provider, model, path, status, up_status, ms, error, req, up_req, snippet,
