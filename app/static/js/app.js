@@ -1041,7 +1041,7 @@ const act = {
       if (!r.ok) return toast(r.data.error || '同步失败', true);
       const list = (r.data && r.data.models) || [];
       const n = act.mapAddUpstream(list);
-      act.renderUpList(r.data, n);
+      act.renderUpList(r.data);
       const nd = ((r.data && r.data.dropped) || []).length;
       toast(n ? ('已从上游同步 ' + n + ' 个新图片模型（上游共 ' + list.length + ' 个' + (act.groupHint(r.data) || '')
                  + (nd ? '，另过滤掉 ' + nd + ' 个非图片' : '') + '）')
@@ -1070,18 +1070,16 @@ const act = {
     if (ks.length < 2) return '';
     return '（' + ks.map(k => esc(k) + ' <b>' + ((g[k] || []).length) + '</b> 个').join(' + ') + '）';
   },
-  renderUpList(d, added) {
+  renderUpList(d) {
+    // 同步结果不再铺一大块预览：模型已经进白名单 chips，候选下拉里也标着「已同步」，再列一遍是重复。
+    // 只在真的过滤掉非图片模型时留一行提示 + 一个「显示全部」的出口。
     const host = $('#upModels');
     if (!host) return;
     const dropped = (d && d.dropped) || [];
-    const dropNote = dropped.length ? `<div class="hint">已过滤 <b>${dropped.length}</b> 个非图片模型（视频/对话等）：
-      <span class="mono">${dropped.slice(0, 8).map(esc).join(', ')}${dropped.length > 8 ? ' …' : ''}</span>
-      <button class="btn btn-sm btn-link" onclick="act.mapSyncAll()">显示全部（含非图片）</button></div>` : '';
-    host.innerHTML = `<div class="hint">上游 <span class="mono">${esc(d.url || '')}</span> 去重后 <b>${d.count || 0}</b> 个${d.image_only === false ? '模型' : '图片模型'}${act.groupHint(d)}；
-      本次新增 <b>${added || 0}</b> 个（带 <span class="mono">/</span> 的按「裸名 → 带前缀真实名」建映射，其余进白名单）
-      <button class="btn btn-sm btn-link" onclick="act.upModelsHide()">收起</button></div>
-      <div class="row" style="gap:4px">${((d.models || []).slice(0, 60)).map(m => `<span class="chip mono">${esc(m)}</span>`).join(' ')}</div>
-      ${dropNote}`;
+    host.innerHTML = dropped.length
+      ? `<div class="hint">已过滤 <b>${dropped.length}</b> 个非图片模型（视频/对话等）
+         <button class="btn btn-sm btn-link" onclick="act.mapSyncAll()">显示全部（含非图片）</button></div>`
+      : '';
   },
   mapSyncAll() { return act.mapSyncUpstream(null, true); },
   mapClear() {
@@ -1151,11 +1149,6 @@ const act = {
   /* -------------------- 上游模型列表（零成本 GET /v1/models，不出图） -------------------- */
 
   async fetchUpModels() { return act.mapSyncUpstream(); },
-  upModelsHide() {
-    const host = $('#upModels');
-    if (host) host.innerHTML = '';
-    state._upPicker = null;
-  },
 
   /* 整理：去空白、去重复、按名字排序（JSON 解析天然去重同名 key，这里再清一遍空值/对象写法） */
   tidyModels() {
