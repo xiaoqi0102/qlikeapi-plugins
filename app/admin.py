@@ -188,6 +188,7 @@ def api_providers(request: Request):
                      for e in store.key_entries(p)],
             "key_groups": _key_groups_of(p),
             "health": store.one("SELECT * FROM health WHERE provider=?", (p["key"],)),
+            "model_health": store.model_health_rows(p["key"]),
             "stats": stats,
             "endpoint": f"/up/{p['key']}",
         })
@@ -317,7 +318,10 @@ def api_provider_test(key: str, request: Request, model: str = ""):
     if not p:
         return JSONResponse({"error": "not found"}, status_code=404)
     res = relay.selftest_provider(p, model or None)
-    if not model:
+    if model:
+        # 逐模型探活：写 model_health 并立刻重算汇总（否则渠道行一直停在「未探测」）
+        store.set_model_health(key, model, res)
+    else:
         store.set_health(key, res)
     return res
 

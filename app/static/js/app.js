@@ -466,6 +466,7 @@ const act = {
       </tr></thead><tbody>${rows.map(p => {
         const open = !!pv.open[p.key];
         const h = p.health || {};
+        const mh = p.model_health || [];
         const st = p.auto_disabled ? ['warn dot', '自动熔断']
           : (!p.enabled ? ['', '已停用'] : (h.ok === 0 ? ['err dot', '异常'] : (h.ok === 1 ? ['ok dot', '已启用'] : ['info dot', '已启用·未探测'])));
         const keys = p.keys || [];
@@ -486,7 +487,7 @@ const act = {
           <td>${keys.length ? `<span class="chip">${keys.length} 把</span>` +
               ((p.key_groups || []).some(g => g.labeled) ? ` <span class="chip info">${(p.key_groups || []).filter(g => g.labeled).length} 组</span>` : '') +
               ` <span class="hint mono">${esc(keys[0].masked)}</span>` : pill('err', '未配置')}</td>
-          <td>${healthPill(h.ok)}<div class="hint">${h.ts ? timeAgo(h.ts) : '未探测'}</div></td>
+          <td>${healthPill(h.ok)}<div class="hint">${h.ts ? timeAgo(h.ts) : '未探测'}${mh.length ? ` · 已探 ${mh.length}/${(p.models || []).length} 模型` : ''}</div></td>
           <td class="num">${(p.stats && p.stats.n) || 0}<div class="hint">成功 ${(p.stats && p.stats.ok) || 0} · 均 ${fmtMs(p.stats && p.stats.avg_ms)}</div></td>
           <td class="acts" onclick="event.stopPropagation()">
             ${p.auto_disabled ? `<button class="ibtn" title="解除自动熔断" onclick="act.providerUnfuse('${esc(p.key)}')"><i class="ti ti-shield-check"></i></button>` : ''}
@@ -514,6 +515,8 @@ const act = {
           </div>
           <div class="k mt-2">模型（客户端名 → 上游真名）</div>
           <div class="row">${(p.models || []).map(m => `<span class="chip mono">${esc(m.id)}${m.aliased ? ' → ' + esc(m.upstream) : ''}</span>`).join(' ') || '<span class="hint">未配置模型</span>'}</div>
+          ${mh.length ? `<div class="k mt-2">各模型健康（点 📡 探活后逐条更新）</div>
+            <div class="row">${mh.map(m => `<span class="chip${m.ok ? '' : ' warn'}" title="${esc(m.message || '')}">${esc(m.model)} · ${m.ok ? '通' : '异常'}${m.upstream_status ? ' ' + m.upstream_status : ''} · ${fmtMs(m.ms)}</span>`).join(' ')}</div>` : ''}
           <div class="k mt-2">密钥池（换行分隔即多把；<b>分组标签::密钥</b> 可按上游分组区分，失败自动轮换 + 冷却）</div>
           <div class="row">${keys.map(k => `<span class="chip mono">${k.label ? `<b>${esc(k.label)}</b>::` : ''}#${k.index} ${esc(k.masked)}</span>`).join(' ') || '<span class="hint">未配置</span>'}</div>
           ${(p.key_groups || []).length ? `<div class="k mt-2">密钥分组（模型 → 用哪一组）</div>

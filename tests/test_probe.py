@@ -155,3 +155,48 @@ def test_dry_run_preview_is_zero_cost(client, login, make_provider, no_upstream)
                     json={"model": "gpt-image-2", "prompt": "猫", "size": "1024x1024"}, headers=MASTER)
     assert r.status_code == 200 and r.json()["dry_run"] is True
     assert no_upstream == []
+
+
+def test_per_model_probe_updates_channel_health(client, login, make_provider, monkeypatch):
+    """回归：面板探活是**逐模型**探的，必须把状态落到渠道上，否则永远停在「未探测」。"""
+    results = {"gpt-image-2": (400, {"error": {"message": "prompt is required"}}, "{}"),
+               "banana": (503, {"error": {"message": "no available accounts"}}, "{}")}
+
+    def _call(url, headers=None, body=None, timeout=None):
+        return results[body["model"]]
+
+    monkeypatch.setattr(protocols, "call_upstream", _call)
+    make_provider(key="p1", model_map={"gpt-image-2": "gpt-image-2", "banana": "banana"})
+
+    assert store.one("SELECT * FROM health WHERE provider='p1'") is None      # 探之前：未探测
+
+    client.post("/api/providers/p1/test?model=gpt-image-2")
+    h = store.one("SELECT * FROM health WHERE provider='p1'")
+    assert h and h["ok"] == 1                                                # 探一条就落地
+
+    client.post("/api/providers/p1/test?model=banana")
+    h = store.one("SELECT * FROM health WHERE provider='p1'")
+    assert h["ok"] == 0 and "banana" in h["message"]                         # 有失败 → 汇总异常
+
+    results["banana"] = (400, {"error": {"message": "prompt is required"}}, "{}")
+    client.post("/api/providers/p1/test?model=banana")
+    h = store.one("SELECT * FROM health WHERE provider='p1'")
+    assert h["ok"] == 1 and "全部通过" in h["message"]                       # 修好后自动转健康
+
+
+def test_providers_payload_exposes_model_health(client, login, make_provider, monkeypatch):
+    monkeypatch.setattr(protocols, "call_upstream",
+                        lambda *a, **k: (400, {"error": {"message": "prompt is required"}}, "{}"))
+    make_provider(key="p1", model_map={"gpt-image-2": "gpt-image-2"})
+    client.post("/api/providers/p1/test?model=gpt-image-2")
+    row = [p for p in client.get("/api/providers").json() if p["key"] == "p1"][0]
+    assert row["model_health"][0]["model"] == "gpt-image-2"
+    assert row["model_health"][0]["ok"] == 1
+
+
+def test_model_health_ignores_removed_models(db, make_provider):
+    """改过模型配置后，历史模型行不该再拖累汇总。"""
+    make_provider(key="p1", model_map={"gpt-image-2": "gpt-image-2"})
+    store.set_model_health("p1", "gpt-image-2", {"ok": 1})
+    store.set_model_health("p1", "已删掉的模型", {"ok": 0, "upstream_message": "gone"})
+    assert store.one("SELECT * FROM health WHERE provider='p1'")["ok"] == 1

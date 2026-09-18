@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS health (
     provider TEXT PRIMARY KEY, ok INTEGER, upstream_status INTEGER,
     ms INTEGER, message TEXT, checked_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS model_health (
+    provider TEXT, model TEXT, ok INTEGER, upstream_status INTEGER,
+    ms INTEGER, message TEXT, checked_at INTEGER,
+    PRIMARY KEY (provider, model)
+);
 CREATE TABLE IF NOT EXISTS sites (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,               -- 站点显示名
@@ -266,6 +271,51 @@ def set_health(provider: str, res: dict) -> None:
                  (res.get("upstream_message") or res.get("error") or "")[:400], int(time.time())))
     except Exception:
         pass
+
+
+def set_model_health(provider: str, model: str, res: dict) -> None:
+    """逐模型探活落地，并重算渠道汇总健康态。
+
+    面板「探活」是**按模型逐条**探的；以前带 model 的探活什么都不写，
+    所以渠道行永远停在「未探测」。现在逐模型写 model_health，再按
+    「所有已探模型都通过才算健康」重算 health 汇总 —— 点一次就更新。
+    """
+    try:
+        with connect() as c:
+            c.execute(
+                "INSERT INTO model_health(provider,model,ok,upstream_status,ms,message,checked_at)"
+                " VALUES(?,?,?,?,?,?,?)"
+                " ON CONFLICT(provider,model) DO UPDATE SET ok=excluded.ok,"
+                " upstream_status=excluded.upstream_status, ms=excluded.ms,"
+                " message=excluded.message, checked_at=excluded.checked_at",
+                (provider, model, 1 if res.get("ok") else 0, res.get("upstream_status"),
+                 res.get("ms"), (res.get("upstream_message") or res.get("error") or "")[:400],
+                 int(time.time())))
+    except Exception:
+        pass
+    recompute_health(provider)
+
+
+def model_health_rows(provider: str) -> list[dict]:
+    return rows("SELECT * FROM model_health WHERE provider=? ORDER BY model", (provider,))
+
+
+def recompute_health(provider: str) -> None:
+    """按 model_health 重算渠道汇总：已探模型全通过才 ok=1。
+
+    只统计**当前渠道仍在用的模型**（改过模型配置后，历史行自动忽略）。
+    """
+    keep = set((get_provider(provider) or {}).get("model_map") or {})
+    rs = [r for r in model_health_rows(provider) if not keep or r["model"] in keep]
+    if not rs:
+        return
+    bad = [r for r in rs if not r["ok"]]
+    st = next((r["upstream_status"] for r in rs if r["upstream_status"]), None)
+    msg = ("；".join(f"{r['model']}: {(r['message'] or '失败')[:120]}" for r in bad)[:400]
+           if bad else f"{len(rs)} 个模型全部通过")
+    set_health(provider, {"ok": 0 if bad else 1, "upstream_status": st,
+                          "ms": max((r["ms"] or 0) for r in rs) or None,
+                          "upstream_message": msg})
 
 
 # ------------------------------------------------------------------ 模型单价 / 计价
