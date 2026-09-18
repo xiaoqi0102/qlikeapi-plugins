@@ -15,6 +15,7 @@ balances.py —— 站点余额查询（取数器插件式，和渠道插件一�
 """
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from typing import Any
@@ -357,41 +358,278 @@ def import_from_env(path: str = "/env/hermes.env") -> dict:
 
 # ------------------------------------------------------------------ 上游价格同步
 
-def sync_prices_from_sites() -> dict:
-    """从上游站点「实测」价格：sub2api 系的 /v1/usage 会给出每个模型的累计消耗与请求数，
-    相除就是真实单价。写进价格表（渠道专属价，币种 USD，来源标记 upstream）。
+# ------------------------------------------------------------------ 价格直读（按渠道）
 
-    还会把该站点 base_url 下的所有渠道实例都配上同价（change2pro 一个站点两套协议都吃同一价）。
+def _client_name(p: dict, upstream: str) -> str:
+    """上游真实名 → 该渠道对外的客户端模型名（不在映射里就原样用上游名）。"""
+    for cli, up in (p.get("model_map") or {}).items():
+        if str(up) == upstream:
+            return cli
+    return upstream
+
+
+def _manual_groups(p: dict) -> list:
+    """渠道选项里手工指定的令牌分组顺序（options.price_groups，数组或逗号串）。
+
+    用途：/api/token/ 读不到（令牌过期/权限不足）时，也能按真实分组顺序算倍率。
     """
-    out = []
-    for site in store.list_sites(only_enabled=True):
-        if site.get("type") != "sub2api":
+    o = p.get("options")
+    if isinstance(o, str):
+        try:
+            o = json.loads(o or "{}")
+        except Exception:
+            o = {}
+    if not isinstance(o, dict):
+        return []
+    g = o.get("price_groups")
+    if isinstance(g, (list, tuple)):
+        return [str(x).strip() for x in g if str(x).strip()]
+    return [x.strip() for x in str(g or "").replace("，", ",").split(",") if x.strip()]
+
+
+def _manual_ratio(p: dict):
+    """渠道选项里的手工分组倍率（options.price_ratio）；没填返回 None。"""
+    o = p.get("options")
+    if isinstance(o, str):
+        try:
+            o = json.loads(o or "{}")
+        except Exception:
+            o = {}
+    if not isinstance(o, dict):
+        return None
+    try:
+        v = float(o.get("price_ratio"))
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
+def _price_note(site_name: str, up: str, info: dict) -> str:
+    """把「裸价 × 倍率 = 实付」的账写清楚（价格不编造，来源/口径都标出来）。"""
+    if info.get("ratio") and abs(info["ratio"] - 1.0) > 1e-9:
+        tag = {"token": "令牌分组", "cheapest": "最便宜可用分组"}.get(info.get("how") or "", "分组")
+        return (f"{site_name} /api/pricing：{up} ${info.get('raw')} × {tag} {info.get('group')} "
+                f"倍率 {info['ratio']} = ${info['price']}/次")
+    return f"{site_name} /api/pricing：{up} = ${info['price']}/次（倍率 1）"
+
+
+def _pricing_effective(models: list, ratios: dict, groups: list) -> dict:
+    """把「平台裸价」折算成「这把 key 实际会被扣的价」。
+
+    New API 的分组倍率语义（aicost 面板原话）：
+      · 一个令牌可以绑多个分组；第一个是默认请求分组，后面的按选择顺序作为失败备用分组；
+      · 每个分组有自己的倍率折扣（同一个模型在不同分组价钱不一样）；
+      · 某个模型只在部分分组可售（enable_groups），默认分组不卖就顺位落到下一个能卖的分组。
+    所以「真实单价 = 模型裸价 × 实际服务分组的倍率」，实际服务分组 = 令牌分组顺序 ∩ 该模型可售分组 的第一个。
+    取不到令牌分组时退化为「该模型可售分组里最便宜的那个」，并在 how 里标明是估算。
+    """
+    order = [str(g).strip() for g in (groups or []) if str(g).strip()]
+    out: dict = {}
+    for m in models or []:
+        if not isinstance(m, dict):
             continue
+        name = str(m.get("model_name") or "").strip()
+        raw = m.get("model_price")
+        if not name or not isinstance(raw, (int, float)) or float(raw) <= 0:
+            continue
+        if int(m.get("quota_type") or 0) != 1:      # 0 = 按 token 倍率计费，没有「每张多少钱」
+            continue
+        eg = [str(g).strip() for g in (m.get("enable_groups") or []) if str(g).strip()]
+        hit = [g for g in order if not eg or g in eg]
+        if hit:
+            group, how = hit[0], "token"          # 令牌自己的分组顺序 = 真实路由
+        elif eg:
+            cand = sorted((float(ratios[g]), g) for g in eg if g in ratios)
+            group, how = (cand[0][1], "cheapest") if cand else ("", "none")
+        else:
+            group, how = (order[0] if order else ""), ("token" if order else "none")
+        ratio = float(ratios.get(group) or 1) if group else 1.0
+        out[name] = {"raw": round(float(raw), 6), "ratio": ratio, "group": group, "how": how,
+                     "price": round(float(raw) * ratio, 6), "groups": eg}
+    return out
+
+
+def _newapi_token_groups(site: dict, api_key: str = "") -> list:
+    """读「这把 key 绑定了哪些分组」（有序：第一个是默认请求分组）。
+
+    New API 的 /api/token/ 列表里 key 是打码的（`bKcI****WreC`），所以用尾 4 位匹配。
+    group 字段可能是逗号分隔的多分组（新版多选），也可能是单个。
+    """
+    base = (site.get("base_url") or "").rstrip("/")
+    if not base:
+        return []
+    h = _headers(site)
+    if site.get("uid"):
+        h["New-Api-User"] = str(site["uid"])
+    try:
+        d = _json(HTTP.get(f"{base}/api/token/?p=0&size=100", headers=h))
+    except Exception:
+        return []
+    if not isinstance(d, dict) or d.get("success") is False:
+        return []
+    data = d.get("data")
+    items = data.get("items") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        return []
+    tail = (api_key or "").strip()[-4:]
+    for t in items:
+        if not isinstance(t, dict):
+            continue
+        if tail and tail not in str(t.get("key") or ""):
+            continue
+        g = t.get("group")
+        if isinstance(g, (list, tuple)):
+            return [str(x).strip() for x in g if str(x).strip()]
+        return [x.strip() for x in str(g or "").replace("，", ",").split(",") if x.strip()]
+    return []
+
+
+def fetch_newapi_pricing(site: dict, api_key: str = "", groups: list | None = None) -> dict:
+    """newapi 系「平台报价」直读：GET {base}/api/pricing（Bearer + New-Api-User: <uid>）。
+
+    返回的每条价 = 裸价 × 该 key 实际服务分组的倍率（见 _pricing_effective），
+    并带上 raw/ratio/group 便于在界面上把账算给人看。
+    """
+    base = (site.get("base_url") or "").rstrip("/")
+    if not base:
+        return {"error": "缺少 base_url"}
+    h = _headers(site)
+    if site.get("uid"):
+        h["New-Api-User"] = str(site["uid"])
+    r = HTTP.get(f"{base}/api/pricing", headers=h)
+    data = _json(r)
+    if r.status_code != 200 or not isinstance(data, dict):
+        return {"error": f"HTTP {r.status_code} {str(data or r.text)[:200]}", "raw": data}
+    if data.get("success") is False:
+        return {"error": str(data.get("message") or "接口返回 success=false"), "raw": data}
+    ratios = data.get("group_ratio") or {}
+    ratios = {str(k): float(v) for k, v in ratios.items() if isinstance(v, (int, float))}
+    lst = data.get("data") if isinstance(data.get("data"), list) else []
+    groups = [str(g).strip() for g in (groups or []) if str(g).strip()] or _newapi_token_groups(site, api_key)
+    prices = _pricing_effective(lst, ratios, groups)
+    return {"prices": prices, "currency": "USD", "total": len(lst),
+            "groups": groups, "ratios": ratios}
+
+
+def _site_of_provider(p: dict) -> dict | None:
+    """渠道实例挂在哪个站点上：先看 site_id，再按 base_url 兜底匹配。"""
+    sid = p.get("site_id")
+    if sid:
+        s = store.get_site(int(sid))
+        if s:
+            return s
+    base = (p.get("base_url") or "").rstrip("/")
+    if not base:
+        return None
+    for s in store.list_sites():
+        if (s.get("base_url") or "").rstrip("/") == base:
+            return s
+    return None
+
+
+def _providers_of_site(site: dict) -> list[dict]:
+    base = (site.get("base_url") or "").rstrip("/")
+    out = []
+    for p in store.list_providers():
+        sid = p.get("site_id")
+        if (sid and int(sid) == int(site["id"])) or (base and (p.get("base_url") or "").rstrip("/") == base):
+            out.append(p)
+    return out
+
+
+def _sync_site_prices(site: dict, only_provider: str | None = None) -> dict:
+    """同步一个站点的真实单价，写到它下面各渠道实例上（按「客户端模型名」落库）。
+
+    - sub2api 系：/v1/usage 的每模型累计消耗 ÷ 请求数 = 真实单价（来源 upstream）
+    - newapi  系：/api/pricing 的按次报价 model_price（来源 platform）
+    """
+    name = site.get("name") or site.get("base_url") or "?"
+    stype = (site.get("type") or "").lower()
+    provs = _providers_of_site(site)
+    if only_provider:
+        provs = [p for p in provs if p["key"] == only_provider]
+        if not provs:
+            return {"site": name, "error": f"渠道 {only_provider} 不在站点「{name}」下，无法直读它的平台价"}
+    if not provs:
+        return {"site": name, "error": "该站点下还没有渠道实例，先建渠道再同步价格"}
+
+    written: list[str] = []
+    if stype == "sub2api":
         try:
             res = fetch_sub2api(site)
         except Exception as e:
-            out.append({"site": site["name"], "error": f"{type(e).__name__}: {e}"})
-            continue
+            return {"site": name, "error": f"{type(e).__name__}: {e}"}
+        if res.get("error"):
+            return {"site": name, "error": res["error"]}
         raw = res.get("raw") or {}
         usage = raw.get("model_usage") or raw.get("model_stats") or []
-        base = (site.get("base_url") or "").rstrip("/")
-        targets = [p["key"] for p in store.rows("SELECT key, base_url FROM providers")
-                   if (p["base_url"] or "").rstrip("/") == base]
-        written = []
         for u in usage:
-            model = u.get("model") or ""
+            up = str(u.get("model") or "")
             req = int(u.get("requests") or 0)
             cost = float(u.get("cost") or u.get("actual_cost") or 0)
-            if not model or req <= 0 or cost <= 0:
+            if not up or req <= 0 or cost <= 0:
                 continue
             unit = round(cost / req, 6)
-            for t in targets:
-                store.set_price_full(model, t, unit, currency="USD", source="upstream",
-                                     note=f"上游实测（{site['name']} /v1/usage：{req} 次 ${cost:.2f}）")
-                written.append(f"{model}@{t}=${unit}")
-            if not targets:      # 站点还没对应渠道实例时，先记成全局价
-                store.set_price_full(model, "*", unit, currency="USD", source="upstream",
-                                     note=f"上游实测（{site['name']}）")
-                written.append(f"{model}@*=${unit}")
-        out.append({"site": site["name"], "balance": res.get("balance"), "prices": written})
-    return {"synced": out}
+            for p in provs:
+                cli = _client_name(p, up)
+                store.set_price_full(cli, p["key"], unit, currency="USD", source="upstream",
+                                     note=f"{name} /v1/usage：{req} 次 ${cost:.2f}")
+                written.append(f"{cli}@{p['key']}=${unit}")
+        return {"site": name, "source": "usage", "balance": res.get("balance"), "prices": written}
+
+    if stype == "newapi":
+        # 一个站点上的不同渠道可能用不同的 key（不同 key 绑不同分组 → 倍率不同），
+        # 所以按渠道逐个直读，绝不共用一份价。
+        res_all = {}
+        for p in provs:
+            keys = [k.strip() for k in (p.get("api_key") or "").split("\n") if k.strip()]
+            k0 = keys[0] if keys else ""
+            if "payload" not in res_all:
+                res_all["payload"] = fetch_newapi_pricing(site, api_key=k0,
+                                                         groups=_manual_groups(p))
+            res = res_all["payload"]
+            if res.get("error"):
+                return {"site": name, "error": res["error"], "group": None}
+            prices = res.get("prices") or {}
+            inv = {str(v): k for k, v in (p.get("model_map") or {}).items()}
+            ov = _manual_ratio(p)                      # 手工倍率覆盖（渠道选项里可填）
+            n = 0
+            for up, info in prices.items():
+                cli = inv.get(up)
+                if not cli:
+                    continue              # 该渠道不对外暴露这个模型，不写价
+                price, note = info["price"], _price_note(name, up, info)
+                if ov is not None:
+                    price = round(float(info.get("raw") or info["price"]) * ov, 6)
+                    note = (f"{name} /api/pricing：{up} ${info.get('raw') or info['price']}"
+                            f" × 手工倍率 {ov} = ${price}")
+                store.set_price_full(cli, p["key"], price,
+                                     currency=res.get("currency") or "USD", source="platform", note=note)
+                written.append(f"{cli}@{p['key']}=${price}")
+                n += 1
+            res_all[p["key"]] = {"group": res.get("groups"), "models": n}
+        return {"site": name, "source": "pricing", "prices": written,
+                "group": (res_all.get(provs[0]["key"]) or {}).get("group") if provs else None,
+                "per_provider": {k: v for k, v in res_all.items() if k != "payload"}}
+
+    return {"site": name, "error": f"站点类型 {stype or '未知'} 不支持价格直读（目前支持 sub2api / newapi）"}
+
+
+def sync_provider_prices(key: str) -> dict:
+    """单个渠道实例的「同步价格」：只从它自己配置的平台直读，别的渠道不碰。"""
+    p = store.get_provider(key, with_keys=False)
+    if not p:
+        return {"ok": False, "error": f"渠道实例 {key} 不存在"}
+    site = _site_of_provider(p)
+    if not site:
+        return {"ok": False, "provider": key,
+                "error": f"渠道 {key} 没关联站点，无法直读平台价（先到「渠道实例」里给它绑定站点）"}
+    out = _sync_site_prices(site, only_provider=key)
+    out["provider"] = key
+    out["ok"] = not out.get("error")
+    return out
+
+
+def sync_prices_from_sites() -> dict:
+    """全部站点一起同步（模型目录页的「全部渠道同步」用它）。"""
+    return {"synced": [_sync_site_prices(s) for s in store.list_sites(only_enabled=True)]}

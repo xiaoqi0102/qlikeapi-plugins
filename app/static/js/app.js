@@ -1330,12 +1330,15 @@ const act = {
     if (!r) return;
     const grp = {};
     r.data.forEach(m => { (grp[m.provider] = grp[m.provider] || {label: m.provider_label, plugin: m.plugin_label, enabled: m.enabled, items: []}).items.push(m); });
-    const SRC = {upstream:['ok','上游实测'], newapi:['info','New API'], manual:['','手工']};
+    const SRC = {upstream:['ok','上游实测'], platform:['info','平台直读'], newapi:['info','New API'], manual:['','手工']};
     $('#models').innerHTML = Object.keys(grp).length ? Object.entries(grp).map(([k, v]) => `
       <div class="panel" style="box-shadow:none;margin-bottom:14px">
         <header><h3><i class="ti ti-server-2"></i>${esc(v.label)} <span class="hint mono">/up/${esc(k)} · ${esc(v.plugin)}</span></h3>
           <div class="acts">${v.enabled ? pill('ok dot', '已启用') : pill('', '已停用')}
-            ${v.priority ? pill('info', '优先级 ' + v.priority) : ''}</div></header>
+            ${v.priority ? pill('info', '优先级 ' + v.priority) : ''}
+            <button class="btn btn-sm btn-outline-secondary" onclick="act.syncProviderPrices('${esc(k)}', this)"
+                    title="只从这个渠道配置的平台直读真实单价（sub2api 用量反推 / newapi 平台报价），零成本不出图">
+              <i class="ti ti-cloud-download"></i> 同步价格</button></div></header>
         <div class="body tight">${table(['客户端模型名','上游真实名','真实单价','价格来源','是否映射','支持操作'],
           v.items.map(m => {
             const src = SRC[m.source] || ['', m.source || '未定价'];
@@ -1355,8 +1358,8 @@ const act = {
              <div class="acts">
                <span class="pill ok">零成本</span><span class="pill">不出图</span>
                <button class="btn btn-sm btn-outline-secondary" onclick="act.syncPrices(this)"
-                       title="按 New API 的 ModelPrice 校准真实单价（与价格表同源）">
-                 <i class="ti ti-cloud-download"></i> 同步价格</button>
+                       title="一次同步所有站点；只想同步某一个渠道，用该渠道标题栏里的「同步价格」">
+                 <i class="ti ti-cloud-download"></i> 全部渠道同步</button>
              </div>
            </header>
            <div class="body">
@@ -1750,13 +1753,29 @@ const act = {
       : emptyBox('还没有 fal 异步任务（只有 fal 类渠道才会产生）', 'ti-hourglass');
   },
 
+  // 单渠道价格同步：只动这一个渠道的价，从它自己配置的平台直读
+  async syncProviderPrices(key, btn) {
+    const old = btn.innerHTML; btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 同步中';
+    const r = await api(`/api/providers/${encodeURIComponent(key)}/prices/sync`, {method:'POST'});
+    btn.disabled = false; btn.innerHTML = old;
+    if (!r) return;
+    const d = r.data || {};
+    if (d.error) { toast(`${key}：${d.error}`, true); return; }
+    const n = (d.prices || []).length;
+    toast(`${key}：直读 ${n} 条单价（${d.source === 'pricing' ? '平台报价' : '用量反推'}）`, n === 0);
+    act.loadModels();
+  },
+
   async syncPrices(btn) {
     const old = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 同步中';
     const r = await api('/api/prices/sync', {method:'POST'});
     btn.disabled = false; btn.innerHTML = old;
     if (!r) return;
-    const n = (r.data.synced || []).reduce((a, x) => a + (x.prices || []).length, 0);
-    toast(`已从上游同步 ${n} 条单价`, n === 0);
+    const synced = r.data.synced || [];
+    const n = synced.reduce((a, x) => a + (x.prices || []).length, 0);
+    const errs = synced.filter(x => x.error);
+    toast(`已同步 ${n} 条单价` + (errs.length ? `；${errs.length} 个站点失败：${errs[0].site}（${errs[0].error}）` : ''), n === 0);
     act.loadModels();
   },
 

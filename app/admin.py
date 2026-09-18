@@ -486,6 +486,18 @@ def api_provider_test(key: str, request: Request, model: str = ""):
     return res
 
 
+@router.post("/providers/{key}/prices/sync")
+def api_provider_prices_sync(key: str, request: Request):
+    """单渠道价格同步：只从这个渠道配置的平台直读真实单价，别的渠道不碰。
+
+    sub2api 系 → /v1/usage 用量反推；newapi 系 → /api/pricing 平台报价。零成本、不出图。"""
+    u, err = need_user(request)
+    if err:
+        return err
+    res = balances.sync_provider_prices(key)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
 @router.post("/providers/{key}/discover-groups")
 def api_provider_discover_groups(key: str, request: Request):
     """探测「每把密钥属于哪个分组、能用哪些模型」——零成本：逐把 GET 上游 /v1/models，绝不出图。
