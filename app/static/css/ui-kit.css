@@ -898,3 +898,15 @@ body.dark .kit-code{background:var(--bg);border-color:var(--line)}
 .pg-report .r.o{background:var(--ok-soft);color:var(--ok-ink)}
 .pg-src{max-height:420px;overflow:auto;white-space:pre;background:var(--surface-3);border:1px solid var(--line);border-radius:var(--r-sm);padding:var(--sp-3);font-family:var(--mono);font-size:var(--fs-sm);margin:0}
 .pg-doc{max-height:440px;overflow:auto;white-space:pre-wrap;word-break:break-word;background:var(--surface-3);border:1px solid var(--line);border-radius:var(--r-sm);padding:var(--sp-3);font-family:var(--mono);font-size:var(--fs-sm);margin:0}
+
+/* ==================== 设置页：重排（用户反馈「太拥挤」）
+   运行信息 → 顶部指标卡 + 左右两栏键值表；图床 → 服务对照表 + 参数区；密码/规范并排。 */
+.set-sec-t{display:flex;align-items:center;gap:6px;font-size:var(--fs-sm);font-weight:600;color:var(--ink-3);
+  letter-spacing:.03em;margin:0 0 var(--sp-2);padding-bottom:var(--sp-1);border-bottom:1px solid var(--line)}
+table.tb.kv{margin:0}
+table.tb.kv th{width:33%;min-width:96px;color:var(--muted);font-weight:550;font-size:var(--fs-sm);vertical-align:top}
+table.tb.kv td{padding:9px 12px}
+table.tb.ih-tb td.ih-ep{font-family:var(--mono);font-size:var(--fs-xs);color:var(--ink-2);word-break:break-all;max-width:240px}
+table.tb.ih-tb .ih-note{display:block;color:var(--muted);font-size:var(--fs-xs);margin-top:2px}
+table.tb.ih-tb td.ih-act{white-space:nowrap;text-align:right}
+table.tb.ih-tb td.ih-act .btn{margin-left:var(--sp-1)}

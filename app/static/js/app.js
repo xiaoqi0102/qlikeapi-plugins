@@ -1721,11 +1721,11 @@ const act = {
         <span class="chip mono">${esc(l.public_path || '')}</span>
       </div>
       ${l.error ? `<label class="form-label">错误</label><pre class="json mb-3">${esc(l.error)}</pre>` : ''}
-      ${curlBox('up', '完整请求 · 本网关 → 上游（凭据已换成 YOUR_API_KEY，可直接复制去实测）', upRead, upStrict)}
-      ${curlBox('cli', '完整请求 · 客户端 → 本网关（同一条请求的入口形态）', cliRead, cliStrict)}
+      ${curlBox('cli', '① 完整请求 · 客户端 → 本网关（入口形态，凭据已换成 YOUR_QLIKE_TOKEN）', cliRead, cliStrict)}
+      ${curlBox('up', '② 完整请求 · 本网关 → 上游（翻译后的报文，凭据已换成 YOUR_API_KEY，可直接复制去实测）', upRead, upStrict)}
       <div class="hint mb-3">「提示词多行」把 JSON 字符串里的 \\n 还原成真实换行，方便读；要直接粘贴执行请切「严格 JSON」。</div>
-      <label class="form-label">客户端请求（原始报文）</label><pre class="json mb-3">${esc(jsonTxt(l.request_json, false))}</pre>
-      <label class="form-label">发给上游的请求（翻译后 · 原始报文）</label><pre class="json mb-3">${esc(jsonTxt(l.upstream_request, false))}</pre>
+      <label class="form-label">① 客户端请求（原始报文）</label><pre class="json mb-3">${esc(jsonTxt(l.request_json, false))}</pre>
+      <label class="form-label">② 发给上游的请求（翻译后 · 原始报文）</label><pre class="json mb-3">${esc(jsonTxt(l.upstream_request, false))}</pre>
       <label class="form-label">响应片段</label><pre class="json">${esc(jsonTxt(l.response_snippet, false))}</pre>`);
   },
 
@@ -1880,22 +1880,24 @@ const act = {
         <label class="form-check-label" for="ihEnabled">启用图床转换（只对「只认公网 URL」「两者都支持」的渠道生效；只认 base64 的渠道永不走图床）</label>
       </div>
       <div class="hint">候选顺序：从上到下依次尝试，第一个成功即用。未勾选的不会被使用。</div>
-      <div class="mt-2">${order.map(id => {
+      <div class="table-wrap mt-2"><table class="tb ih-tb">
+        <thead><tr><th>启用</th><th>服务</th><th>有效期</th><th>上传地址</th><th class="ih-act">操作</th></tr></thead>
+        <tbody>${order.map(id => {
         const h = byId[id] || {id, label: id, ttl: '', note: '', endpoint: ''};
         const on = chain.includes(id);
-        return `<div class="d-flex align-items-start gap-2 py-1">
-          <input type="checkbox" class="form-check-input mt-1" data-ih="${esc(id)}" ${on ? 'checked' : ''}>
-          <div class="flex-grow-1">
-            <b>${esc(h.label)}</b> <span class="chip">${esc(h.ttl)}</span>
-            ${!on ? '<span class="chip">已停用</span>' : ''}
-            ${h.needs_key && !d.imgbb_key_set ? '<span class="chip warn">未配 Key → 自动跳过</span>' : ''}
-            <div class="hint">${esc(h.note)} · <span class="mono">${esc(h.endpoint)}</span></div>
-          </div>
-          <button class="btn btn-sm btn-outline-secondary" title="上移" onclick="act.ihMove('${esc(id)}',-1)"><i class="ti ti-arrow-up"></i></button>
-          <button class="btn btn-sm btn-outline-secondary" title="下移" onclick="act.ihMove('${esc(id)}',1)"><i class="ti ti-arrow-down"></i></button>
-          <button class="btn btn-sm btn-outline-secondary" onclick="act.ihTest('${esc(id)}')">自检</button>
-        </div>`; }).join('')}</div>
-      <hr>
+        return `<tr>
+          <td><input type="checkbox" class="form-check-input" data-ih="${esc(id)}" ${on ? 'checked' : ''}></td>
+          <td><b>${esc(h.label)}</b>${on ? '' : ' <span class="chip">已停用</span>'}${h.needs_key && !d.imgbb_key_set ? ' <span class="chip warn">未配 Key → 自动跳过</span>' : ''}
+            <span class="ih-note">${esc(h.note)}</span></td>
+          <td><span class="chip">${esc(h.ttl)}</span></td>
+          <td class="ih-ep">${esc(h.endpoint)}</td>
+          <td class="ih-act">
+            <button class="btn btn-sm btn-outline-secondary" title="上移" aria-label="上移" onclick="act.ihMove('${esc(id)}',-1)"><i class="ti ti-arrow-up"></i></button>
+            <button class="btn btn-sm btn-outline-secondary" title="下移" aria-label="下移" onclick="act.ihMove('${esc(id)}',1)"><i class="ti ti-arrow-down"></i></button>
+            <button class="btn btn-sm btn-outline-secondary" title="上传 1×1 自检图" onclick="act.ihTest('${esc(id)}')">自检</button>
+          </td></tr>`; }).join('')}</tbody>
+      </table></div>
+      <div class="set-sec-t mt-4"><i class="ti ti-adjustments"></i>参数</div>
       <div class="row g-2">
         <div class="col-md-6"><label class="form-label">ImgBB API Key
           ${d.imgbb_key_set ? '（已配置 <span class="mono">' + esc(d.imgbb_key_masked) + '</span>，留空=不改）' : '（不填则跳过 ImgBB）'}</label>
@@ -1909,7 +1911,7 @@ const act = {
             <input id="ihTo" class="form-control" type="number" min="5" max="120" value="${esc(cfg.timeout_s)}">
           </div></div>
       </div>
-      <div class="hint mt-2"><i class="ti ti-alert-triangle"></i> 参考图会被上传到上面选中的<b>第三方公共服务</b>（临时链接，会过期）。
+      <div class="hint mt-3"><i class="ti ti-alert-triangle"></i> 参考图会被上传到上面勾选的<b>第三方公共服务</b>（临时链接，会过期）。
         别拿它传私密素材。本服务本身不落盘、不转存：只有「渠道官方文档只认公网 URL」时才转。</div>
       <div class="d-flex gap-2 mt-3 align-items-center flex-wrap">
         <button class="btn btn-primary" onclick="act.ihSave()"><i class="ti ti-device-floppy"></i> 保存</button>
@@ -1963,31 +1965,60 @@ const act = {
     act.loadImagehost();
     const r = await api('/api/sysinfo');
     if (!r) return;
-    const d = r.data;
+    const d = r.data, enc = d.enc || {}, counts = d.counts || {}, g = d.gate || {};
+    const errN = Object.keys(d.plugin_errors || {}).length;
+    const chips = (arr) => (arr || []).map(x => `<span class="chip mono">${esc(x)}</span>`).join(' ') || '<span class="hint">—</span>';
+    const row = (k, v) => `<tr><th>${k}</th><td>${v}</td></tr>`;
+    const kv = (rows) => `<table class="tb kv"><tbody>${rows.filter(Boolean).join('')}</tbody></table>`;
+    const tiles = [
+      stat('版本', esc(d.version), esc(d.webui || '图片协议转换网关'), 'ti-tag'),
+      stat('已装载插件', (d.plugins || []).length, errN ? `<span class="chip warn">${errN} 个装载失败</span>` : '全部装载正常',
+        'ti-puzzle', errN ? 'warn' : 'ok'),
+      stat('数据量', Object.values(counts).reduce((a, b) => a + (b || 0), 0),
+        Object.entries(counts).map(([k, v]) => `${esc(k)} ${v}`).join(' · ') || '—', 'ti-database'),
+      stat('密钥加密', enc.encrypted || 0,
+        enc.broken ? `<span class="chip warn">解不开 ${enc.broken}</span>`
+          : enc.plaintext ? `<span class="chip warn">明文残留 ${enc.plaintext}</span>`
+            : `来源 ${esc(enc.source || '—')}`,
+        enc.broken ? 'ti-shield-exclamation' : 'ti-shield-lock',
+        enc.broken ? 'err' : (enc.plaintext ? 'warn' : 'ok')),
+    ].join('');
     $('#sysinfo').innerHTML = `
-      <table class="tb">
-        <tr><th style="width:150px">版本</th><td>${esc(d.version)}</td></tr>
-        <tr><th>数据库</th><td class="mono">${esc(d.db)}</td></tr>
-        <tr><th>已装载插件</th><td>${(d.plugins||[]).map(p => `<span class="chip mono">${esc(p)}</span>`).join(' ') || '—'}</td></tr>
-        ${Object.keys(d.plugin_errors||{}).length ? `<tr><th>插件错误</th><td class="hint">${Object.entries(d.plugin_errors).map(([k,v]) => esc(k)+' → '+esc(v)).join('；')}</td></tr>` : ''}
-        <tr><th>内部主密钥</th><td>${d.master_token_set ? pill('ok', '已设置') + ' <span class="mono">' + esc(d.master_token_masked) + '</span>' : pill('err', '未设置')}</td></tr>
-        <tr><th>数据量</th><td>${Object.entries(d.counts||{}).map(([k,v]) => `<span class="chip">${esc(k)} ${v}</span>`).join(' ')}</td></tr>
-        ${d.enc ? `<tr><th>密钥加密</th><td>${pill('ok', '已开启')}
-          <span class="chip mono">来源 ${esc(d.enc.source)}</span>
-          <span class="chip">已加密 ${d.enc.encrypted}</span>
-          ${d.enc.plaintext ? `<span class="chip warn">明文残留 ${d.enc.plaintext}（保存一次即自动加密）</span>` : ''}
-          ${d.enc.broken ? `<span class="chip warn">解不开 ${d.enc.broken}（QLIKEAPI_SECRET 变过？重新填一次密钥）</span>` : ''}</td></tr>` : ''}
-        ${d.gate ? `<tr><th>并发闸门</th><td>全局上限 <b>${d.gate.global_limit || '不限'}</b> · 排队等待 <b>${d.gate.queue_wait}s</b> · 队列上限 <b>${d.gate.max_waiting}</b>；
-          当前占用 ${Object.keys(d.gate.busy || {}).length ? Object.entries(d.gate.busy).map(([k, v]) => `<span class="chip mono">${esc(k)} ${v}</span>`).join(' ') : '—'}；
-          排队中 <b>${d.gate.waiting}</b> · 累计拒绝 <b>${d.gate.rejected}</b>
-          <div class="hint">渠道级上限在「渠道实例 → 编辑 → 并发上限」里配；全局上限用环境变量 QLIKEAPI_MAX_CONCURRENCY（0=不限）</div></td></tr>` : ''}
-        ${d.router ? `<tr><th>路由决策</th><td>一条请求最多打 <b>${d.router.max_attempts}</b> 次上游；可重试状态码 <span class="mono">${(d.router.retryable || []).join(' ')}</span>
-          <div class="hint">响应头 X-QLike-Provider / X-QLike-Failover / X-QLike-Chain / X-QLike-Attempt / X-QLike-Degrade / X-QLike-Queue-Ms 可逐请求对账</div></td></tr>` : ''}
-        ${d.breaker ? `<tr><th>自动熔断</th><td>连续失败 <b>${d.breaker.after}</b> 次 → 自动停用并放回兜底；
-          <b>${Math.round(d.breaker.cooldown / 60)}</b> 分钟后自动恢复（探活通过才恢复）</td></tr>` : ''}
-        <tr><th>余额熔断</th><td>站点余额低于「预警线」→ 自动停用关联渠道（在渠道实例里选「关联站点」才会跟余额联动）</td></tr>
-        ${d.webui ? `<tr><th>界面</th><td>${esc(d.webui)}</td></tr>` : ''}
-      </table>`;
+      <div class="cards">${tiles}</div>
+      <div class="grid2">
+        <div>
+          <div class="set-sec-t"><i class="ti ti-server-2"></i>环境</div>
+          ${kv([
+            row('数据库', `<span class="mono">${esc(d.db)}</span>`),
+            row('已装载插件', chips(d.plugins)),
+            row('内部主密钥', d.master_token_set
+              ? pill('ok', '已设置') + ' <span class="mono">' + esc(d.master_token_masked) + '</span>'
+              : pill('err', '未设置')),
+            errN ? row('插件错误', `<span class="hint">${Object.entries(d.plugin_errors).map(([k, v]) => esc(k) + ' → ' + esc(v)).join('；')}</span>`) : '',
+            d.webui ? row('界面', esc(d.webui)) : '',
+          ])}
+        </div>
+        <div>
+          <div class="set-sec-t"><i class="ti ti-adjustments-alt"></i>运行策略</div>
+          ${kv([
+            d.enc ? row('密钥加密', `${pill('ok', '已开启')} <span class="chip mono">来源 ${esc(enc.source)}</span>`
+              + ` <span class="chip">已加密 ${enc.encrypted}</span>`
+              + (enc.plaintext ? ` <span class="chip warn">明文残留 ${enc.plaintext}（保存一次即自动加密）</span>` : '')
+              + (enc.broken ? ` <span class="chip warn">解不开 ${enc.broken}（QLIKEAPI_SECRET 变过？重新填一次密钥）</span>` : '')) : '',
+            d.gate ? row('并发闸门', `全局上限 <b>${g.global_limit || '不限'}</b> · 排队等待 <b>${g.queue_wait}s</b> · 队列上限 <b>${g.max_waiting}</b>`
+              + `<br>当前占用 ${Object.keys(g.busy || {}).length ? Object.entries(g.busy).map(([k, v]) => `<span class="chip mono">${esc(k)} ${v}</span>`).join(' ') : '—'}`
+              + ` · 排队中 <b>${g.waiting}</b> · 累计拒绝 <b>${g.rejected}</b>`) : '',
+            d.router ? row('路由决策', `一条请求最多打 <b>${d.router.max_attempts}</b> 次上游`
+              + ` · 可重试状态码 <span class="mono">${(d.router.retryable || []).join(' ')}</span>`) : '',
+            d.breaker ? row('自动熔断', `连续失败 <b>${d.breaker.after}</b> 次 → 自动停用并放回兜底；`
+              + `<b>${Math.round(d.breaker.cooldown / 60)}</b> 分钟后自动恢复（探活通过才恢复）`) : '',
+            row('余额熔断', '站点余额低于「预警线」→ 自动停用关联渠道（在渠道实例里选「关联站点」才会跟余额联动）'),
+          ])}
+        </div>
+      </div>
+      <div class="hint mt-1">渠道级并发上限在「渠道实例 → 编辑 → 并发上限」里配；全局上限用环境变量
+        <code class="mono">QLIKEAPI_MAX_CONCURRENCY</code>（0=不限）。逐请求对账看响应头
+        <span class="mono">X-QLike-Provider / -Failover / -Chain / -Attempt / -Degrade / -Queue-Ms</span>。</div>`;
   },
 
   async changePw() {
