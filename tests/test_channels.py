@@ -5,7 +5,7 @@ import pytest
 
 from app import channels
 
-BUILTIN = ("gemini_native", "openai_images", "qiniu_fal", "qiniu", "change2pro")
+BUILTIN = ("gemini_native", "openai_images", "qiniu_fal", "qiniu", "change2pro", "aicost")
 
 
 def provider_for(cid: str) -> dict:
@@ -163,3 +163,137 @@ def test_every_channel_declares_ref_input(db):
     assert channels.get("qiniu_fal").info()["ref_input"] == "url"
     assert channels.get("gemini_native").info()["ref_input"] == "base64"
     assert channels.get("qiniu").info()["ref_input_faces"] == {"异步面": "url", "同步面": "base64"}
+
+
+# ------------------------------------------------------------------ aicost.me
+
+def _aicost_p():
+    p = provider_for("aicost")
+    p["base_url"] = "https://www.aicost.me"
+    return p
+
+
+def test_aicost_merges_two_faces_by_model():
+    """aicost 合并插件：gemini 系走 generateContent（去掉 /v1），gpt-image 系走 /v1/images/*。"""
+    ch = channels.get("aicost")
+    p = _aicost_p()
+    url_g, up_g, meta_g = ch.build(p, {"model": "gemini-3-pro-image", "prompt": "x"}, False)
+    assert meta_g["face"] == "gemini_native"
+    assert url_g == "https://www.aicost.me/v1beta/models/gemini-3-pro-image-preview:generateContent"
+    # 站点方文档写死「必填」的两项，缺了上游直接拒
+    assert up_g["generationConfig"]["responseModalities"] == ["TEXT", "IMAGE"]
+    assert up_g["generationConfig"]["imageConfig"] == {"aspectRatio": "16:9", "imageSize": "2K"}
+
+    url_o, up_o, meta_o = ch.build(p, {"model": "gpt-image-2", "prompt": "x"}, False)
+    assert meta_o["face"] == "openai_images"
+    assert url_o == "https://www.aicost.me/v1/images/generations"
+    assert (up_o["n"], up_o["quality"], up_o["output_format"], up_o["moderation"]) == (1, "auto", "jpeg", "auto")
+    assert meta_o["poll_base"] == "https://www.aicost.me/v1/images/generations"
+
+
+def test_aicost_edit_path_and_client_fields_win():
+    """edit 走 /v1/images/edits；默认值只在客户端没给的时候补，不覆盖客户端的选择。"""
+    ch = channels.get("aicost")
+    url, up, _ = ch.build(_aicost_p(), {"model": "gpt-image-2", "prompt": "x",
+                                        "quality": "high", "output_format": "png", "n": 2}, True)
+    assert url == "https://www.aicost.me/v1/images/edits"
+    assert up["output_format"] == "png" and up["n"] == 2 and up["quality"] == "high"
+
+
+def test_aicost_gemini_size_maps_to_ratio_and_tier():
+    """gemini 面的尺寸只传「比例 + 档位」，具体像素由站点自己映射（文档 §1.3）。"""
+    _, up, meta = channels.get("aicost").build(
+        _aicost_p(), {"model": "gemini-3.1-flash-image", "prompt": "x", "size": "1920x1080"}, False)
+    iconf = up["generationConfig"]["imageConfig"]
+    assert iconf["aspectRatio"] == "16:9"
+    assert iconf["imageSize"] in ("1K", "2K", "4K")
+    assert "size_note" in meta
+
+
+def test_aicost_gemini_ref_image_goes_inline_base64():
+    _, up, meta = channels.get("aicost").build(
+        _aicost_p(), {"model": "gemini-3.1-flash-image", "image": "data:image/png;base64,QUJD"}, False)
+    assert up["contents"][0]["parts"] == [{"inlineData": {"mimeType": "image/png", "data": "QUJD"}}]
+    assert meta["refs"] == 1
+
+
+def test_aicost_declares_ref_input_per_face():
+    ch = channels.get("aicost")
+    assert ch.info()["ref_input_faces"] == {"gemini 面": "base64", "image2 面": "both"}
+    assert ch.declared_ref_input({"model_map": {}}, {"model": "gemini-3-pro-image"}, False) == "base64"
+    assert ch.declared_ref_input({"model_map": {}}, {"model": "gpt-image-2"}, False) == "both"
+
+
+def test_aicost_parse_covers_documented_shapes():
+    """文档 §5 列出的返回位置都要能认（b64 与 URL 两种）。"""
+    ch = channels.get("aicost")
+    b64 = "A" * 80
+    assert ch.parse({"data": [{"b64_json": b64}]}) == [{"b64_json": b64}]
+    assert ch.parse({"data": [{"url": "https://x/1.png"}]}) == [{"url": "https://x/1.png"}]
+    assert ch.parse({"image_base64": b64}) == [{"b64_json": b64}]
+    assert ch.parse({"images": [{"url": "https://x/2.png"}]}) == [{"url": "https://x/2.png"}]
+    assert ch.parse({"result": {"image_url": {"url": "https://x/3.png"}}}) == [{"url": "https://x/3.png"}]
+    assert ch.parse({"choices": [{"message": {"content": "图在 https://x/4.png 里"}}]}) == [{"url": "https://x/4.png"}]
+    gem = {"candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": "QUJD"}}]}}]}
+    assert ch.parse(gem) == [{"b64_json": "QUJD", "mime_type": "image/png"}]
+    assert ch.parse({}) == []
+
+
+def test_aicost_task_id_detection():
+    ch = channels.get("aicost")
+    assert ch.task_id({"task_id": "t1", "status": "pending"}) == "t1"
+    assert ch.task_id({"taskId": "t2", "status": "processing"}) == "t2"
+    assert ch.task_id({"data": {"task_id": "t3"}}) == "t3"
+    assert ch.task_id({"data": [{"url": "https://x/1.png"}]}) == ""
+
+
+def test_aicost_poll_skips_when_not_a_task():
+    """不是异步任务就交回常规流程（绝不能把正常结果吞掉）。"""
+    ch = channels.get("aicost")
+    assert ch.poll({"data": [{"url": "https://x/1.png"}]}, {"poll_base": "https://a/v1/images/generations"}, {}) == ("SKIP", None)
+    assert ch.poll({"task_id": "t", "status": "succeeded"}, {"poll_base": "https://a/v1/images/generations"}, {}) == ("SKIP", None)
+    assert ch.poll({"task_id": "t", "status": "pending"}, {}, {}) == ("SKIP", None)   # 没有轮询地址
+
+
+def test_aicost_poll_returns_image(monkeypatch):
+    from app import protocols
+
+    ch = channels.get("aicost")
+    _, _, meta = ch.build(_aicost_p(), {"model": "gpt-image-2", "prompt": "x"}, False)
+    seen = []
+
+    class _R:
+        def json(self):
+            return {"data": [{"b64_json": "C" * 80}]}
+
+    monkeypatch.setattr(protocols.HTTP, "get", lambda url, headers=None: seen.append(url) or _R())
+    monkeypatch.setattr(protocols, "POLL_INTERVAL", 0.0)
+    state, payload = ch.poll({"task_id": "task_1", "status": "pending"}, meta, {"Authorization": "Bearer sk-x"})
+    assert state == "OK"
+    assert seen == ["https://www.aicost.me/v1/images/generations/task_1"]
+    assert ch.parse(payload) == [{"b64_json": "C" * 80}]
+
+
+def test_aicost_poll_reports_failure(monkeypatch):
+    from app import protocols
+
+    class _R:
+        def json(self):
+            return {"status": "failed", "error": "boom"}
+
+    monkeypatch.setattr(protocols.HTTP, "get", lambda url, headers=None: _R())
+    monkeypatch.setattr(protocols, "POLL_INTERVAL", 0.0)
+    state, payload = channels.get("aicost").poll(
+        {"task_id": "t1", "status": "processing"}, {"poll_base": "https://a/v1/images/generations"}, {})
+    assert state == "FAILED" and payload["error"] == "boom"
+
+
+def test_async_poll_hook_is_optional():
+    """只有实现了 poll 的插件才多走一轮；其它插件行为一点不变。"""
+    from app.channels.base import Channel
+
+    assert channels.get("aicost").has_async_poll() is True
+    for cid in ("gemini_native", "openai_images", "qiniu", "qiniu_fal", "change2pro"):
+        assert channels.get(cid).has_async_poll() is False, cid
+    with pytest.raises(NotImplementedError):
+        Channel().poll({}, {}, {})

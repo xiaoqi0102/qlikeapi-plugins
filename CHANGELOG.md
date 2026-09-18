@@ -1,3 +1,24 @@
+## [3.14.0] - 2026-09-18
+
+### 新增
+- **aicost.me 生图渠道插件**（`app/channels/aicost.py`，口径来自站点方《aicost.me 图片插件模型接口文档》）：
+  一个插件覆盖该站两套图片协议，按模型名自动分流 —— `gemini-*` 走
+  `POST /v1beta/models/{model}:generateContent`（Base 去掉 `/v1` 再拼 `v1beta`），
+  `gpt-image-*` 走 `POST /v1/images/generations|edits`。
+  站点方文档写死的「必填」字段按文档补默认值（image2 面 `n=1 / quality=auto / output_format=jpeg /
+  moderation=auto`；gemini 面 `responseModalities=["TEXT","IMAGE"]` + `imageConfig` 默认 `16:9 / 2K`），
+  **客户端显式给了就听客户端的**。解析覆盖文档 §5 列出的全部返回位置（`b64_json` / `image_base64` /
+  `images[]` / `output` / `result` / `choices[].message.content` 里的链接 / gemini `inlineData`）。
+  模型预置映射（`gemini-3-pro-image` → `gemini-3-pro-image-preview` 等）在实例漏配时兜底，插件开箱可用。
+- **插件可选钩子 `poll()`：上游回异步任务时也能同步交付**。有的站点不回图而回
+  `{"task_id": "...", "status": "pending"}`（aicost.me 文档 §2.3 / §3.3）。插件实现 `poll()` 后，
+  relay 只在「上游没直接给图」时调用它轮询到出图，客户端拿到的仍是 OpenAI 形状的同步结果；
+  **没实现 `poll()` 的插件行为一点不变**。`("SKIP", None)` = 不是异步任务，交回常规流程。
+
+### 文档
+- 《渠道插件编写说明》新增 **4.1 节（`poll()` 契约）**、「现成实现」表新增一行；`_template.py` 与
+  `docs/CHANNEL-PLUGINS.md` 同步（含 aicost 参考实现）。
+
 ## [3.13.2] - 2026-09-18
 
 ### 修复

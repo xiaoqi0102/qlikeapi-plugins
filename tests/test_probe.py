@@ -200,3 +200,44 @@ def test_model_health_ignores_removed_models(db, make_provider):
     store.set_model_health("p1", "gpt-image-2", {"ok": 1})
     store.set_model_health("p1", "已删掉的模型", {"ok": 0, "upstream_message": "gone"})
     assert store.one("SELECT * FROM health WHERE provider='p1'")["ok"] == 1
+
+@pytest.fixture()
+def aicost_probe_calls(db, make_provider, monkeypatch):
+    """aicost（合并插件：gemini 面 + image2 面）的探活夹具。"""
+    calls = []
+
+    def _call(url, headers=None, body=None, timeout=None):
+        calls.append({"url": url, "headers": headers, "body": body, "timeout": timeout})
+        return 400, {"error": {"message": "prompt is required"}}, '{"error":{"message":"prompt is required"}}'
+
+    monkeypatch.setattr(protocols, "call_upstream", _call)
+    p = make_provider(key="aicost", protocol="aicost", base_url="https://www.aicost.me",
+                      model_map={"gemini-3-pro-image": "gemini-3-pro-image-preview",
+                                 "gpt-image-2": "gpt-image-2"})
+    return calls, p
+
+
+@pytest.mark.parametrize("model,path", [
+    ("gemini-3-pro-image", "/v1beta/models/gemini-3-pro-image-preview:generateContent"),
+    ("gpt-image-2", "/v1/images/generations"),
+])
+def test_aicost_selftest_sends_no_prompt_at_all(aicost_probe_calls, model, path):
+    """aicost 两面都要抹干净 —— 合并插件正是当年探活花钱事故的源头。"""
+    calls, p = aicost_probe_calls
+    res = relay.selftest_provider(p, model)
+    assert res["ok"] is True and res["upstream_status"] == 400
+    assert calls[0]["url"] == f"https://www.aicost.me{path}"
+    assert calls[0]["timeout"] == relay.PROBE_TIMEOUT
+    blob = json.dumps(calls[0]["body"], ensure_ascii=False)
+    assert "probe" not in blob
+    for pth, value in walk_prompt_like(calls[0]["body"]):
+        assert not value, f"探活请求里 {pth} 还带着内容：{value!r}"
+
+
+def test_aicost_selftest_never_triggers_poll(aicost_probe_calls, monkeypatch):
+    """探活只打一次上游：绝不在探活流程里发轮询请求。"""
+    calls, p = aicost_probe_calls
+    hit = []
+    monkeypatch.setattr(protocols.HTTP, "get", lambda url, headers=None: hit.append(url))
+    relay.selftest_provider(p, "gpt-image-2")
+    assert hit == [] and len(calls) == 1

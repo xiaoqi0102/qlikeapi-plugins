@@ -107,7 +107,7 @@ curl -s localhost:18673/healthz     # {"ok":true,...}
 
 | 字段 | 填什么 |
 |---|---|
-| 插件 | 选对应的上游协议：`change2pro`（合并）、`qiniu`（合并）、`qiniu_fal`、`openai_images`、`gemini_native` —— 面板会显示该插件的协议归属方与官方文档 |
+| 插件 | 选对应的上游协议：`change2pro`（合并）、`qiniu`（合并）、`aicost`（合并）、`qiniu_fal`、`openai_images`、`gemini_native` —— 面板会显示该插件的协议归属方与官方文档 |
 | 上游地址 | 例如 `https://api.change2pro.com` |
 | 密钥 | 上游站给你的 API key（会加密入库） |
 | 模型映射 | 客户端模型名 → 上游真实模型名（如 `gpt-image-2` → `openai/gpt-image-2`） |

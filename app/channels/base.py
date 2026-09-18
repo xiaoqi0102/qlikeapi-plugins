@@ -49,6 +49,20 @@ class Channel:
     def parse(self, payload: Any) -> list[dict]:
         return []
 
+    # ---- 可选：异步任务轮询 ----
+    # 有的上游会「先回任务号、稍后再出图」（如 aicost.me 的 {task_id, status}）。
+    # 插件实现了 poll 就由 relay 在「上游没直接给图」时调用一次；没实现的插件完全不受影响。
+    #   poll(first, meta, headers) -> (状态, 结果)
+    #     状态 OK      = 拿到图（relay 会用 parse() 解析结果）
+    #     状态 SKIP    = 这压根不是异步任务（交回 relay 常规流程）
+    #     其它状态      = 拿不到图（relay 按上游错误处理，日志里能看到原始返回）
+    def poll(self, first: Any, meta: dict, headers: dict, timeout: float | None = None) -> tuple[str, Any]:
+        raise NotImplementedError
+
+    def has_async_poll(self) -> bool:
+        """插件是否实现了异步轮询钩子（relay 靠它决定要不要多等一轮）。"""
+        return type(self).poll is not Channel.poll
+
     # ---- 参考图能力协商 ----
     def declared_ref_input(self, p: dict, body: dict, edit: bool) -> str:
         """插件声明的参考图形态；合并插件（按模型分流）可在这里按「面」细化。"""

@@ -92,6 +92,7 @@ CHANNEL = MyRelay()
 - `native` —— 上游协议就是 OpenAI 图片接口，报文原样透传
 - `converted` —— 本服务负责翻译成上游协议（大多数情况）
 - `queue` —— 异步队列：提交任务 + 轮询取结果（七牛 fal 风格）
+- 上游只是**偶尔**回异步任务时不要用 `queue`（那会把同步请求也塞进队列流程），改用 4.1 的可选钩子 `poll()`
 
 ## 四、`build()` 契约
 
@@ -110,6 +111,24 @@ def build(self, p: dict, body: dict, edit: bool) -> tuple[str, dict, dict]
   - `meta` 进请求日志的附加信息（**别放密钥**），常用键：`up_model`、`refs`、`face`、`removed`
 
 **要报错就抛 `ChannelError("原因")`** —— 它会变成给客户端的 HTTP 400，**不会**打到上游、不会扣费。
+
+### 4.1 可选：上游回的是异步任务（`poll()`）
+
+少数站点会**先回任务号、稍后再出图**（如 `{"task_id": "...", "status": "pending"}`）。
+这种不用改 `operations`，只给插件加一个可选钩子：
+
+```python
+def poll(self, first, meta, headers, timeout=None) -> tuple[str, object]:
+    """first = 上游第一次返回的报文；meta 就是 build() 返回的那个 meta（轮询地址可以塞在里面）。"""
+```
+
+- `("OK", 最终报文)` —— 网关用 `parse()` 解析它，客户端照样拿到同步结果
+- `("SKIP", None)` —— 这不是异步任务，交回网关常规流程（**不是任务时必须 SKIP**，否则会把正常结果吞掉）
+- 其它状态 —— 拿不到图，网关按上游错误处理（日志里能看到原始返回）
+
+没实现 `poll()` 的插件行为一点不变：网关只在「上游没直接给图」时才多问一次。
+轮询用 `protocols.HTTP.get(url, headers=h)`，间隔与上限用 `protocols.POLL_INTERVAL` / `protocols.POLL_MAX`，
+参考实现见 `app/channels/aicost.py`。
 
 ## 五、参考图口径 `ref_input`（重要）
 
@@ -143,6 +162,7 @@ def build(self, p: dict, body: dict, edit: bool) -> tuple[str, dict, dict]
 | 上游是 Gemini 原生 `generateContent` | `return protocols.build_gemini_native(p, body, edit)` + `parse_gemini_native(payload)` |
 | 上游是 fal 风格异步队列 | `return protocols.build_fal_queue(p, body, edit)`（配套 `poll_fal` / `fal_endpoints`） |
 | 从任意形状响应挖图片 URL | `protocols.extract_urls(payload) -> (urls, 错误信息)` |
+| 上游偶尔回异步任务 | 实现可选钩子 `poll()`（见 4.1，参考 `app/channels/aicost.py`） |
 | 打上游（带超时与统一日志） | `protocols.call_upstream(url, headers, body)` → `(状态码, json, 文本)` |
 | 拼鉴权头 | `protocols.auth_headers(auth_mode, secret)` |
 | 取上游模型名（走实例映射） | `protocols.upstream_model(p, body["model"])` |

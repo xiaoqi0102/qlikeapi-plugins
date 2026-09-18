@@ -136,6 +136,7 @@ return [{"url": u} for u in urls]
 | `set_path` / `remove_path` / `apply_removals` | 点号路径读写字段（支持 `*` 与数字下标，用于 `options.remove_params`） |
 | `build_gemini_native` / `build_openai_images` / `build_fal_queue` | 三种协议的现成实现（**通用工具，不带任何一家中转的私货**），插件里可直接复用 |
 | `parse_gemini_native` / `parse_openai_images` / `poll_fal` | 对应的解析与轮询 |
+| `POLL_INTERVAL` / `POLL_MAX` / `HTTP` | 可选钩子 `poll()` 用的轮询间隔、上限与 HTTP 客户端 |
 | `fal_endpoints(p, model, edit)` | 取 fal 的提交/查询端点（可被 `options` 覆盖） |
 
 ### `utils.py`
@@ -166,6 +167,8 @@ return [{"url": u} for u in urls]
 | `qiniu_fal` | **七牛 ModelInk 自家**的 fal 风格异步队列：`POST /queue/{...}` → 轮询 `/requests/{id}/status`（**不是 fal.ai 官方协议**） | `queue` | 参考图**必须是公网 URL**（异步面拿不到本地文件）；结果 `images[].url` 是七牛 Kodo 签名链接（约 7 天），会过期，所以不转存 |
 | `qiniu` | **合并插件**：七牛 ModelInk 同步面 + fal 异步面 | `converted` | `face_of(model)` 按模型名分流：`gemini-*` 走七牛异步队列（`Authorization: Key`），`gpt-image-*` 走同步面（`Bearer`，固定 `b64_json`、**不认 `response_format`**，插件自动剔除）；一个实例覆盖两面 |
 | `change2pro` | **合并插件**：Change2Pro 同一站点两套协议 | `converted` | `face_of(model)` 按模型名分流：`gemini-*` 走 `generateContent`，其它走 `/images/generations`（注意**没有 `/v1`**）；一个实例、一把 key 覆盖两套协议 |
+
+| `aicost` | **合并插件**：aicost.me 同一站点两套协议 | `converted` | `face_of(model)` 按模型名分流：`gemini-*` 走 `/v1beta/models/{model}:generateContent`（Base 去掉 `/v1`），`gpt-image-*` 走 `/v1/images/generations\|edits`；站点方文档的「必填」字段按文档补默认值；**上游偶尔回 `{task_id,status}` 时用可选钩子 `poll()` 轮询到出图** |
 
 > `change2pro` 也是「合并插件」的示范：当上游站点把多套协议挂在同一个域名同一把 key 下时，
 > 用一个插件内部按模型名分流，比在 New API 里配两个渠道更好维护。

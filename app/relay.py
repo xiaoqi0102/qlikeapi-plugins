@@ -286,6 +286,12 @@ def _shape_success(p: dict, body: dict, meta: dict, up_json: Any, headers: dict,
     data = ch.parse(up_json) if ch else []
     if not data and isinstance(up_json, dict) and isinstance(up_json.get("data"), list):
         data = up_json["data"]
+    if not data and ch is not None and ch.has_async_poll():
+        # 上游回了任务号而不是图（如 aicost.me）→ 交给插件轮询，客户端照样拿到同步结果
+        state, polled = ch.poll(up_json, meta or {}, headers)
+        if state == "OK":
+            up_json = polled
+            data = ch.parse(polled) or [{"url": u} for u in protocols.extract_urls(polled)[0]]
     if not data:
         urls, err = protocols.extract_urls(up_json)
         if urls:

@@ -15,6 +15,8 @@
   · 图片不落盘：b64 或上游 URL 原样交给客户端
   · build() 里不要自己发网络请求：统一走 protocols.call_upstream（它有超时与统一日志）
   · meta 里放有用的信息（face / refs / removed / up_model），会进请求日志，便于排障
+  · 上游如果「偶尔回异步任务」（{task_id, status}）而不是直接给图，实现可选的 poll() 钩子即可，
+    不要为此声明 operations 的 queue 模式（那会把同步请求也塞进队列流程）—— 参考 app/channels/aicost.py
 """
 from __future__ import annotations
 
@@ -74,6 +76,24 @@ class MyRelay(Channel):
         """
         urls, _ = protocols.extract_urls(payload)
         return [{"url": u} for u in urls]
+
+    # ---- 可选：上游回的是异步任务时 ----
+    # 实现了这个方法，网关就只会在「上游没直接给图」时多问你一次；
+    # 不是异步任务时务必返回 ("SKIP", None)，把流程交回网关。
+    #
+    # def poll(self, first, meta, headers, timeout=None):
+    #     tid = (first or {}).get("task_id")
+    #     if not tid or (first or {}).get("status") not in ("pending", "queued", "processing"):
+    #         return "SKIP", None
+    #     url = f"{meta['poll_base']}/{tid}"
+    #     h = {k: v for k, v in headers.items() if k.lower() != "content-type"}
+    #     while True:
+    #         time.sleep(protocols.POLL_INTERVAL)
+    #         payload = protocols.HTTP.get(url, headers=h).json()
+    #         if self.parse(payload):
+    #             return "OK", payload
+    #         if str(payload.get("status", "")).lower() in ("failed", "error", "cancelled"):
+    #             return "FAILED", payload
 
 
 # 文件名以下划线开头 = 不注册。去掉下面这行、并把文件名改成不以 _ 开头即可启用。
