@@ -1706,7 +1706,7 @@ const act = {
         <button class="on" data-mode="readable" onclick="act.curlMode('readable')">提示词多行</button>
         <button data-mode="strict" onclick="act.curlMode('strict')">严格 JSON</button></div>`;
     const curlBox = (target, title, read, strict) => `
-      <div class="d-flex align-items-center justify-content-between mb-1" style="gap:8px;flex-wrap:wrap">
+      <div class="curl-head mb-1">
         <label class="form-label mb-0">${title}</label>
         <div class="acts">${seg}
           <button class="btn btn-sm btn-outline-secondary" onclick="act.copyCurl('${target}')"><i class="ti ti-clipboard"></i> 复制</button></div>
@@ -1725,9 +1725,10 @@ const act = {
       ${l.error ? `<label class="form-label">错误</label><pre class="json mb-3">${esc(l.error)}</pre>` : ''}
       ${act.imagehostNote(l.imagehost) ? `<div class="hint mb-3"><i class="ti ti-arrows-exchange"></i>
         参考图转换：${act.imagehostNote(l.imagehost)}</div>` : ''}
-      ${curlBox('cli', '① 完整请求 · 客户端 → 本网关（入口形态，凭据已换成 YOUR_QLIKE_TOKEN）', cliRead, cliStrict)}
-      ${curlBox('up', '② 完整请求 · 本网关 → 上游（翻译后的报文，凭据已换成 YOUR_API_KEY，可直接复制去实测）', upRead, upStrict)}
-      <div class="hint mb-3">「提示词多行」把 JSON 字符串里的 \\n 还原成真实换行，方便读；要直接粘贴执行请切「严格 JSON」。</div>
+      ${curlBox('cli', '① 完整请求 · 客户端 → 本网关', cliRead, cliStrict)}
+      ${curlBox('up', '② 完整请求 · 本网关 → 上游', upRead, upStrict)}
+      <div class="hint mb-3">① 是客户端发来的入口形态（凭据已换成 YOUR_QLIKE_TOKEN）；② 是翻译后真正发给上游的报文
+        （凭据已换成 YOUR_API_KEY，可直接复制去实测）。「提示词多行」把 JSON 字符串里的 \\n 还原成真实换行，方便读；要直接粘贴执行请切「严格 JSON」。</div>
       <label class="form-label">① 客户端请求（原始报文）</label><pre class="json mb-3">${esc(jsonTxt(l.request_json, false))}</pre>
       <label class="form-label">② 发给上游的请求（翻译后 · 原始报文）</label><pre class="json mb-3">${esc(jsonTxt(l.upstream_request, false))}</pre>
       <label class="form-label">响应片段</label><pre class="json">${esc(jsonTxt(l.response_snippet, false))}</pre>`);

@@ -49,7 +49,8 @@ ui-diff: ## 新旧样式 A/B 计算样式比对（需 playwright + chromium；�
 	@# ⚠ 别注入远古单文件 style.css，否则满屏假差异
 	@curl -sf -o /dev/null http://127.0.0.1:$(PORT)/static/style.css || \
 	  { echo "✗ 容器内缺 /static/style.css（旧样式对照组），先 docker cp 注入，否则比对全是假差异"; exit 2; }
-	$(PY) scripts/ui_style_diff.py
+	@set -a; eval "$$(grep -E '^[[:space:]]*-?[[:space:]]*QLIKEAPI_ADMIN_(USER|PASS):' docker-compose.yml | sed 's/^[[:space:]]*-[[:space:]]*//; s/: */=/; s/"//g')"; set +a; \
+	python3 scripts/ui_style_diff.py   # 用系统 python3：.venv 里没装 playwright
 
 docker-build: ## 构建镜像
 	docker build -t qlikeapi-plugins:latest .

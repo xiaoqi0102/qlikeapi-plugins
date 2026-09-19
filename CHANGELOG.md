@@ -90,6 +90,22 @@
 - 实测（零成本端到端，假上游 + 临时渠道，测完删干净）：`X-QLike-Imagehost: inline`；
   日志 `upstream_request` 里 image 字段为 `<参考图 base64 数据，约 374KB>`；`imagehost` 列记下 from/bytes/mime ✓。
 
+### 修复：日志详情的「①② 完整请求」标题行对齐
+- 现象（用户截图指出）：② 的标题比 ① 长，`flex-wrap:wrap` 把右侧按钮组挤到第二行并变成左对齐
+  （实测 ① `acts.left=783`、② `acts.left=258`，② 行高 60 vs ① 33）。
+- 修法：新增 `.curl-head`（`flex-wrap:nowrap` + 标题 `flex:1 1 auto;min-width:0` + `.acts{flex:0 0 auto}`），
+  标题过长时在自身内部换行，按钮恒在右上；两个区块标题同步缩短（说明文字移到下面那行提示）。
+- 实测（真实 DOM，同一弹窗）：①② 均 `rowH=33`、`actsLeft=783`、`sameLine=True` —— 完全对齐。
+- `make ui-diff` 期望「合计差异: 0」✓（顺带修好 Makefile 的 ui-diff 目标：`.venv` 里没 playwright，改用系统 `python3` 并自动注入管理凭据环境变量）。
+
+### 修复：客户端那一行（路由汇总）看不到「② 本网关 → 上游」
+- 现象：客户端真实走的是 `/v1/images`，落的是 `kind=router` 汇总行，该行只记了 ① 客户端报文，
+  ② 显示 `--data 'null'` + 「老日志没记上游地址」。
+- 修法：`invoke_provider()` 的成功返回里带上 `up_url/up_method/up_body/up_headers`（请求头已过
+  `_redact_headers()`，无凭据），路由汇总行把它们一起落库。
+- 实测：路由汇总行 `POST http://…/v1/images/edits` + 上游报文（参考图仍是 `<参考图 base64 数据，约 374KB>`）✓。
+- 同时把探针留下的 3 条测试日志行（#285/#288/#290）清掉。
+
 ## v3.15.2 — 2026-09-18
 
 ### 修正：CI 变红（文档防漂移校验失败）

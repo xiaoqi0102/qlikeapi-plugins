@@ -394,7 +394,8 @@ def _imagehost_info(meta: dict) -> dict:
     parts += [f"参考图 URL → 内联 base64（{n['bytes'] // 1024}KB）" for n in ins]
     return {"imagehost": ",".join(hosts + (["inline"] if ins else [])),
             "imagehost_n": len(ups) + len(ins),
-            "imagehost_note": "；".join(parts)}
+            "imagehost_note": "；".join(parts),
+            "imagehost_raw": notes}          # 原始明细，供路由汇总行落库（面板据此显示转换说明）
 
 
 def _countable_failure(status: int | None) -> bool:
@@ -500,6 +501,9 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
                           imagehost=(meta or {}).get("imagehost"))
         return out, {"ms": int((time.time() - t0) * 1000), "upstream_status": status,
                      "images": images, "cost": cost, "currency": currency, "attempts": attempt,
+                     # 上游报文/地址：供路由汇总行落库，让客户端那一行也能看到「② 本网关 → 上游」
+                     "up_url": url, "up_method": "POST", "up_body": up_body,
+                     "up_headers": _redact_headers(headers, secret),
                      **_size_info(meta), **_imagehost_info(meta)}
 
     msg = f"渠道 '{provider}' 所有 key 均不可用或已进冷却"
@@ -783,8 +787,11 @@ def _handle_router(request: Request, edit: bool):
             if info.get("size_note"):
                 snippet["size"] = info["size_note"]
             store.log_row("-", model, "/v1/images", 200, None, int((time.time() - t0) * 1000),
-                          None, body, None, json.dumps(snippet, ensure_ascii=False),
-                          kind="router", attempts=attempt)
+                          None, body, info.get("up_body"), json.dumps(snippet, ensure_ascii=False),
+                          kind="router", attempts=attempt, key_index=None,
+                          up_url=info.get("up_url"), up_method=info.get("up_method"),
+                          up_headers=info.get("up_headers"),
+                          imagehost=info.get("imagehost_raw"))
             resp = JSONResponse(protocols.unify_model(p, body, out, client_model=model))
             resp.headers["X-QLike-Provider"] = p["key"]        # 方便和 New API 日志对账
             resp.headers["X-QLike-Failover"] = str(len(tried))

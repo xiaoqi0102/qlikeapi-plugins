@@ -130,6 +130,18 @@ def test_router_reports_decision_headers(client, make_provider, fake_upstream):
     assert r.headers["X-QLike-Queue-Ms"].isdigit()
 
 
+def test_router_row_records_upstream_request(client, make_provider, fake_upstream, db):
+    """客户端那一行（路由汇总 kind=router）也要能看到「② 本网关 → 上游」：地址/报文/请求头。"""
+    make_provider(key="a", priority=20, model_map={"gpt-image-2": "gpt-image-2"})
+    fake_upstream(200, {"data": [{"url": "https://k.example.com/1.png"}]}, '{"data":[]}')
+    r = client.post("/v1/images/generations", json={"model": "gpt-image-2", "prompt": "x"}, headers=MASTER)
+    assert r.status_code == 200
+    row = db.one("SELECT upstream_request, upstream_url, upstream_method FROM logs "
+                 "WHERE kind='router' ORDER BY id DESC LIMIT 1")
+    assert row["upstream_request"] and "gpt-image-2" in row["upstream_request"]   # 不再是 null
+    assert row["upstream_url"] and row["upstream_method"] == "POST"
+
+
 def test_router_marks_degrade_when_falling_to_next_tier(client, make_provider, monkeypatch):
     """首档 5xx → 降到第二档：Degrade=1、Failover=1。"""
     make_provider(key="a", priority=20, model_map={"gpt-image-2": "gpt-image-2"})
