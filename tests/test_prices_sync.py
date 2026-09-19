@@ -200,3 +200,37 @@ def test_manual_groups_override(db, make_provider):
     assert balances._manual_groups({"options": {"price_groups": "a，b"}}) == ["a", "b"]
     assert balances._manual_groups({"options": "{}"}) == []
     assert balances._manual_groups({"options": "不是json"}) == []
+
+
+def test_global_manual_price_also_blocks_channel_sync(db, make_provider, monkeypatch):
+    """用户给某个模型设了「全局手工价」时，同步不许再写渠道专属价把它盖住。"""
+    make_provider(key="aicost", protocol="aicost", base_url="https://www.aicost.me",
+                  model_map={"gpt-image-2": "gpt-image-2"})
+    _bind("aicost", _site())
+    store.set_price_full("gpt-image-2", "*", 0.033, "USD", source="manual", note="我按 Ozon 主图结算")
+
+    monkeypatch.setattr(balances, "fetch_newapi_pricing", lambda s, api_key='', groups=None: {
+        "prices": {"gpt-image-2": {"price": 0.445}}, "currency": "USD", "total": 1})
+
+    res = balances.sync_provider_prices("aicost")
+
+    assert res["ok"] is True
+    assert res["skipped"] == ["gpt-image-2@aicost（该模型设了全局手工价）"]
+    assert [r for r in store.list_prices() if r["provider"] == "aicost"] == []   # 没往下写渠道专属价
+
+
+def test_synced_global_price_does_not_block_channel_sync(db, make_provider, monkeypatch):
+    """反例：全局价是同步来的（source!=manual）→ 不该被当成锁，渠道价照常写。"""
+    make_provider(key="aicost", protocol="aicost", base_url="https://www.aicost.me",
+                  model_map={"gpt-image-2": "gpt-image-2"})
+    _bind("aicost", _site())
+    store.set_price_full("gpt-image-2", "*", 0.03, "CNY", source="newapi", note="同步自 New API")
+
+    monkeypatch.setattr(balances, "fetch_newapi_pricing", lambda s, api_key='', groups=None: {
+        "prices": {"gpt-image-2": {"price": 0.445}}, "currency": "USD", "total": 1})
+
+    res = balances.sync_provider_prices("aicost")
+
+    assert res["skipped"] == []
+    row = [r for r in store.list_prices() if r["provider"] == "aicost"][0]
+    assert row["price"] == 0.445 and row["source"] == "platform"

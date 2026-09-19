@@ -542,10 +542,25 @@ def _providers_of_site(site: dict) -> list[dict]:
     return out
 
 
+def _manual_lock(model: str, provider: str) -> str:
+    """这一格有没有被「手工价」锁住？锁住了同步就别写（手工价 > 上游价）。
+
+    两种情况都算锁：
+    · 这一格本身是手工价（model + provider）；
+    · 这个模型被设了**全局手工价**（model + `*`）—— 再写渠道专属价就会把它盖住，
+      在页面上等于用户填的价被同步改掉了。
+    返回命中的层（provider 或 `*`），没锁返回空串。
+    """
+    for prov in (provider, "*"):
+        row = store.price_exact(model, prov)
+        if row and (row.get("source") or "") == "manual":
+            return prov
+    return ""
+
+
 def _keep_manual(model: str, provider: str) -> bool:
-    """这一格是不是用户手工填的价？是的话同步别覆盖它（手工价 > 上游价）。"""
-    row = store.price_exact(model, provider)
-    return bool(row and (row.get("source") or "") == "manual")
+    """只要被手工价锁住就 True（保留给老调用方）。"""
+    return bool(_manual_lock(model, provider))
 
 
 def _sync_site_prices(site: dict, only_provider: str | None = None) -> dict:
@@ -584,8 +599,9 @@ def _sync_site_prices(site: dict, only_provider: str | None = None) -> dict:
             unit = round(cost / req, 6)
             for p in provs:
                 cli = _client_name(p, up)
-                if _keep_manual(cli, p["key"]):
-                    skipped.append(f"{cli}@{p['key']}")
+                lock = _manual_lock(cli, p["key"])
+                if lock:
+                    skipped.append(f"{cli}@{p['key']}" + ("（该模型设了全局手工价）" if lock == "*" else ""))
                     continue
                 store.set_price_full(cli, p["key"], unit, currency="USD", source="upstream",
                                      note=f"{name} /v1/usage：{req} 次 ${cost:.2f}")
@@ -614,8 +630,9 @@ def _sync_site_prices(site: dict, only_provider: str | None = None) -> dict:
                 cli = inv.get(up)
                 if not cli:
                     continue              # 该渠道不对外暴露这个模型，不写价
-                if _keep_manual(cli, p["key"]):
-                    skipped.append(f"{cli}@{p['key']}")
+                lock = _manual_lock(cli, p["key"])
+                if lock:
+                    skipped.append(f"{cli}@{p['key']}" + ("（该模型设了全局手工价）" if lock == "*" else ""))
                     continue
                 price, note = info["price"], _price_note(name, up, info)
                 if ov is not None:
