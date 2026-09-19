@@ -311,6 +311,19 @@ def test_inline_url_refs_reports_download_failure(monkeypatch):
     assert out["image"] == ["https://i.ibb.co/gone.png"]
 
 
+def test_fetch_ref_streams_and_aborts_over_cap(monkeypatch):
+    """边下边卡上限：超限立刻中断（不是先把整个文件吃进内存）。"""
+    big = b"\x89PNG\r\n\x1a\n" + b"\x00" * (2 * 1024 * 1024)          # 2MB
+    monkeypatch.setattr(ih, "TRANSPORT", httpx.MockTransport(
+        lambda r: httpx.Response(200, content=big, headers={"content-type": "image/png"})))
+    with pytest.raises(ih.NotAnImage) as e:
+        ih.fetch_ref("https://i.ibb.co/big.png", _cfg(max_mb=1))          # 上限 1MB
+    assert "超过" in str(e.value)
+
+    mime, raw = ih.fetch_ref("https://i.ibb.co/big.png", _cfg(max_mb=4))  # 上限够 → 正常拿到
+    assert mime == "image/png" and len(raw) == len(big)
+
+
 def test_inline_url_refs_rejects_non_image_download(monkeypatch):
     monkeypatch.setattr(ih, "TRANSPORT", httpx.MockTransport(
         lambda r: httpx.Response(200, text="<html>not an image</html>",

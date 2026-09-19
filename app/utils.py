@@ -357,6 +357,27 @@ def collect_refs(body: dict) -> list[str]:
     return refs
 
 
+_B64_RE = re.compile(r"^[A-Za-z0-9+/=\s]+$")
+
+
+def compact_b64(obj: Any, limit: int = 512) -> Any:
+    """递归把「长 base64 / data URI 字符串」换成 `<base64:N bytes>` 占位 —— **只给日志用**。
+
+    日志里存几 MB 的参考图既没用又占地方（还会把「可复制 curl」撑爆）；
+    长度信息保留，方便一眼看出客户端到底传了多大的参考图。
+    """
+    if isinstance(obj, str):
+        s = obj.strip()
+        if len(s) > limit and (s.startswith("data:") or _B64_RE.fullmatch(s)):
+            return "<base64:%d bytes>" % len(s)
+        return obj
+    if isinstance(obj, dict):
+        return {k: compact_b64(v, limit) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [compact_b64(v, limit) for v in obj]
+    return obj
+
+
 def to_raw_b64(ref: str) -> tuple[str, str] | None:
     if ref.startswith("data:"):
         m = re.match(r"data:([^;,]+);base64,(.+)", ref, re.S)

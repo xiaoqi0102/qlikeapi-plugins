@@ -435,23 +435,30 @@ MAX_INLINE_MB = 20.0
 
 
 def fetch_ref(url: str, cfg: dict | None = None, client: httpx.Client | None = None) -> tuple[str, bytes]:
-    """下载公网参考图（**内存里，不落盘**），返回 (mime, 原始字节)。"""
+    """下载公网参考图（**内存里，不落盘**），返回 (mime, 原始字节)。
+
+    流式读取 + 边读边卡上限：一超限立刻中断，**不会先把整个文件吃进内存**。
+    返回的字节只在本次请求生命周期内存在，请求结束即被回收（不缓存、不落盘）。
+    """
     if not is_public_url(url):
         raise NotAnImage("参考图不是公网 http(s) 直链")
     cfg = cfg or settings()
+    cap = float(cfg.get("max_mb") or MAX_INLINE_MB) * 1024 * 1024
     own = client is None
     c = client or _client(cfg)
     try:
-        r = c.get(url)
-        if r.status_code >= 400:
-            raise NotAnImage(f"下载参考图失败 HTTP {r.status_code}")
-        raw = r.content
+        with c.stream("GET", url) as r:
+            if r.status_code >= 400:
+                raise NotAnImage(f"下载参考图失败 HTTP {r.status_code}")
+            mime = (r.headers.get("content-type") or "").split(";")[0].strip().lower()
+            buf = bytearray()
+            for chunk in r.iter_bytes(64 * 1024):
+                buf += chunk
+                if len(buf) > cap:
+                    raise NotAnImage(f"参考图超过 {cap / 1024 / 1024:g}MB（边下边判，已中断）")
+        raw = bytes(buf)
         if not raw:
             raise NotAnImage("下载到的参考图是空的")
-        cap = float(cfg.get("max_mb") or MAX_INLINE_MB)
-        if len(raw) > cap * 1024 * 1024:
-            raise NotAnImage(f"参考图超过 {cap:g}MB")
-        mime = (r.headers.get("content-type") or "").split(";")[0].strip().lower()
         if not mime.startswith("image/"):
             mime = sniff_mime(raw) or ""
         if not mime.startswith("image/"):

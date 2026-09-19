@@ -17,7 +17,7 @@ import secrets
 import sqlite3
 import time
 
-from . import crypto
+from . import crypto, utils
 
 DB_PATH = os.environ.get("QLIKEAPI_DB", "/data/qlikeapi.db")
 
@@ -255,8 +255,9 @@ def log_row(provider, model, path, status, up_status, ms, error, req, up_req, sn
                 "cost_currency,token,token_id,upstream_url,upstream_method,upstream_headers)"
                 " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (int(time.time()), provider, model, path, status, up_status, ms, error,
-                 json.dumps(req, ensure_ascii=False)[:8000],
-                 json.dumps(up_req, ensure_ascii=False)[:8000], (snippet or "")[:4000], kind,
+                 json.dumps(utils.compact_b64(req), ensure_ascii=False)[:8000],
+                 json.dumps(utils.compact_b64(up_req), ensure_ascii=False)[:8000],
+                 (snippet or "")[:4000], kind,
                  attempts, key_index, images, cost, cost_currency, token, token_id,
                  up_url, up_method,
                  json.dumps(up_headers, ensure_ascii=False) if up_headers else None))
