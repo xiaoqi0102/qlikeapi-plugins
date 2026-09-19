@@ -41,7 +41,10 @@ JS = """() => {
   return [...document.querySelectorAll('body *')].map(el => {
     const cs = getComputedStyle(el);
     const o = {tag: el.tagName, cls: (el.className || '').toString().slice(0, 70)};
-    o.inKit = !!el.closest('.pk, .pk-pop, .cf, .set-sec, .kv2, .price-cell, .ih-sw');   // 新增组件（多选选择器/确认框/设置页四列区块）内部元素，不参与回归比对
+    // 不参与回归比对：新增组件（多选选择器/确认框/设置页四列区块）+ v3.16.2 起统一口径的「操作」列
+    // （表头与按钮一律右对齐、td.acts 修回 table-cell —— 这是有意的全局调整，不是样式漂移）
+    o.inKit = !!el.closest('.pk, .pk-pop, .cf, .set-sec, .kv2, .price-cell, .ih-sw,'
+      + ' td.acts, td.ops-cell, th.ops-cell, th.ih-act, .ops-row');
     for (const p of props) o[p] = cs[p];
     return o;
   });

@@ -597,7 +597,9 @@ table.tb input.pinp:focus{outline:none;border-color:var(--brand);box-shadow:var(
 
 table.tb th.pick,table.tb td.pick{width:38px;text-align:center;padding-left:10px;padding-right:4px}
 
-table.tb input[type=checkbox]{width:15px;height:15px;accent-color:var(--brand);cursor:pointer;vertical-align:middle;margin:0}
+table.tb input[type=checkbox]:not(.form-check-input){width:15px;height:15px;accent-color:var(--brand);cursor:pointer;vertical-align:middle;margin:0}
+/* 上一条会把 Bootstrap 的开关（form-check-input）也压成 15px 小方块 → 图床每行的启停看起来像单选圈，
+   所以开关必须排除在外，让它保持胶囊+滑块的样子（和「启用图床转换」那个总开关一致）。 */
 
 table.tb tr.picked{background:var(--brand-soft)}
 
@@ -937,6 +939,8 @@ table.tb.ih-tb td .ih-sw .form-check-input{margin:0;cursor:pointer}
    用户反馈：插件行的操作按钮竖着排 —— 该列被前面几列的 chips 挤到 ~53px，
    Bootstrap 的 flex-wrap 于是让每个按钮各占一行。做法：列宽按内容收缩 + 不换行，
    容器固定 flex-direction:row（不换行，插件多按钮时也不会掉成竖排）。 */
-table.tb th.ops-cell{white-space:nowrap;width:1%}
-table.tb td.ops-cell{white-space:nowrap;width:1%}
+/* 操作列口径：表头「操作」和按钮统一靠右、与表格右边缘齐平（width:1% 让列宽贴住按钮，不留一截空） */
+table.tb th.ops-cell,table.tb td.ops-cell{white-space:nowrap;width:1%;text-align:right}
+table.tb td.acts{display:table-cell;text-align:right;white-space:nowrap;width:1%}
+table.tb.ih-tb th.ih-act{text-align:right;white-space:nowrap;width:1%}
 .ops-row{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--sp-1)}

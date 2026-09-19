@@ -632,7 +632,7 @@ const act = {
           onclick="event.stopPropagation()" onchange="act.batchAll(this.checked)"></th>
         <th style="min-width:190px">显示名 / 实例名</th><th>渠道插件</th><th>状态</th>
         <th title="数字越大越优先">优先级</th><th title="同优先级内按权重分流">权重</th>
-        <th>模型</th><th>密钥</th><th>健康</th><th>近 24h 调用</th><th style="text-align:right">操作</th>
+        <th>模型</th><th>密钥</th><th>健康</th><th>近 24h 调用</th><th class="ops-cell">操作</th>
       </tr></thead><tbody>${rows.map(p => {
         const open = !!pv.open[p.key];
         const h = p.health || {};
@@ -771,7 +771,8 @@ const act = {
          <label class="sw" title="${t.enabled ? '点击停用' : '点击启用'}"><input type="checkbox" ${t.enabled ? 'checked' : ''}
            onchange="act.tokenToggle(${t.id}, this.checked)"><span></span></label>`
       ];
-    }))
+    }), {hcls: [null, null, null, null, null, null, 'ops-cell'],
+         ccls: [null, null, null, null, null, null, 'ops-cell']})
       : emptyBox('还没有访问令牌：点右上角「新建令牌」，把生成的 key 填到 New API 的渠道里（替代内部主密钥）', 'ti-key');
 
     $('#tokenNote').innerHTML = `<div class="note">
@@ -1605,7 +1606,8 @@ const act = {
           + (f.used_by && f.used_by.length ? `<div class="hint">实例：${esc(f.used_by.join('、'))}</div>` : ''),
         srcPill(f), stPill(f), opsHTML(f), refHTML(f), modelHTML(f),
         `<span class="hint">${esc(f.hint || '')}</span>`, actsHTML(f)]),
-      { ccls: [null, null, null, null, null, null, null, 'ops-cell'] })
+      { hcls: [null, null, null, null, null, null, null, 'ops-cell'],
+        ccls: [null, null, null, null, null, null, null, 'ops-cell'] })
       + `<div class="p-3 hint">插件目录 <code>${esc(d.plugin_dir || '')}</code>：面板安装的插件落在这里（挂载卷，重建容器不丢）。
          新增一个渠道 = 装插件 → 去「渠道实例」新建实例选它；改完即时生效，不用重启容器。</div>`
       : emptyBox('没有插件', 'ti-puzzle'));
@@ -1776,7 +1778,7 @@ const act = {
     if (!r) return;
     const KIND = {relay:['info','转发'], client:['warn','本地校验'], probe:['','探活']};
     $('#logs').innerHTML = r.data.length ? table(
-      ['时间','类型','渠道','模型','路径','状态','令牌','耗时','尝试','密钥',''],
+      ['时间','类型','渠道','模型','路径','状态','令牌','耗时','尝试','密钥','操作'],
       r.data.map(l => [`<span class="hint">${fmtTime(l.ts)}</span>`,
         (() => { const k = KIND[l.kind] || ['', l.kind || '']; return pill(k[0], k[1]); })(),
         esc(l.provider), `<span class="mono">${esc(l.model||'')}</span>`,
@@ -1786,7 +1788,9 @@ const act = {
         `<span class="mono">${l.upstream_status ?? '—'}</span>`, fmtMs(l.ms),
         `<span class="hint">${l.attempts ?? '—'}</span>`,
         `<span class="hint">${l.key_index == null ? '—' : '#' + l.key_index}</span>`,
-        `<button class="btn btn-sm btn-outline-secondary" onclick="act.logDetail(${l.id})">详情</button>`]))
+        `<button class="btn btn-sm btn-outline-secondary" onclick="act.logDetail(${l.id})">详情</button>`]),
+      {hcls: [null, null, null, null, null, null, null, null, null, null, 'ops-cell'],
+       ccls: [null, null, null, null, null, null, null, null, null, null, 'ops-cell']})
       : emptyBox(state.logs.page ? '这一页没有日志了，试试上一页' : '没有匹配的日志', 'ti-notebook');
     $('#logs').innerHTML += `<div class="pager">
       <span class="hint">第 <b>${state.logs.page + 1}</b> 页 · 本页 ${r.data.length} 条${off ? ` · 跳过前 ${off} 条` : ''}</span>
@@ -1941,7 +1945,7 @@ const act = {
     state.sites = r.data;
     const byCur = {}; let low = 0, bad = 0;
     state.sites.forEach(s => {
-      if (s.last_error) bad++;
+      if (s.last_error && !(s.type === 'manual' && s.last_balance == null)) bad++;
       if (s.low) low++;
       if (s.last_balance != null && !s.last_error) { const k = s.last_unit || 'USD'; byCur[k] = (byCur[k]||0) + Number(s.last_balance); }
     });
@@ -1953,16 +1957,19 @@ const act = {
       ${stat('查询异常', bad, '网络/鉴权失败，点刷新重试', 'ti-alert-octagon', bad ? 'err' : '')}`;
 
     $('#sites').innerHTML = state.sites.length ? table(
-      ['站点','类型','余额','已用','套餐/账号','最近检查','状态',''],
+      ['站点', '类型', '余额', '已用', '套餐/账号', '最近检查', '状态', '操作'],
       state.sites.map(s => [`<div><b>${esc(s.name)}</b></div>${s.base_url ? `<div class="hint mono">${esc(s.base_url)}</div>` : ''}`,
         `<span class="chip">${esc(s.type_label || s.type)}</span>`,
         `<span class="num" style="font-size:var(--fs-lg)">${money(s.last_balance, s.last_unit)}</span>${s.low ? ' ' + pill('warn', '低') : ''}`,
         `<span class="num hint">${s.last_used == null ? '—' : money(s.last_used, s.last_unit)}</span>`,
         `<span class="hint">${esc(s.last_plan || '—')}</span>`, `<span class="hint">${fmtTime(s.last_checked)}</span>`,
-        s.last_error ? pill('err', '失败') : (s.last_checked ? pill('ok dot', '正常') : pill('', '未查询')),
+        (s.type === 'manual' && s.last_balance == null) ? pill('info', '待填余额')
+          : (s.last_error ? pill('err', '失败') : (s.last_checked ? pill('ok dot', '正常') : pill('', '未查询'))),
         `<div class="acts"><button class="btn btn-sm btn-primary" onclick="act.checkSite(${s.id}, this)"><i class="ti ti-refresh"></i> 刷新</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="act.siteForm(${s.id})"><i class="ti ti-pencil"></i> 编辑</button>
-          <button class="btn btn-sm btn-outline-danger" onclick="act.delSite(${s.id})"><i class="ti ti-trash"></i> 删除</button></div>`]))
+          <button class="btn btn-sm btn-outline-danger" onclick="act.delSite(${s.id})"><i class="ti ti-trash"></i> 删除</button></div>`]),
+      {hcls: [null, null, null, null, null, null, null, 'ops-cell'],
+       ccls: [null, null, null, null, null, null, null, 'ops-cell']})
       : emptyBox('还没有站点。可点「从 .env 导入」或「新增站点」', 'ti-wallet');
   },
 
