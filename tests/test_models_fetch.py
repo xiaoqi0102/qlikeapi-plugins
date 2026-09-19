@@ -147,6 +147,14 @@ def test_sysinfo_exposes_gate_and_router(login):
     assert 429 in d["router"]["retryable"]
 
 
+def test_sysinfo_exposes_server_info(login):
+    """设置页「服务器」区块的数据来源。"""
+    s = login.get("/api/sysinfo").json()["server"]
+    assert s["hostname"] and s["python"]
+    assert s["mem"]["total"] > 0 and s["disk"]["total"] > 0
+    assert set(s["uptime"]) == {"host", "process"}
+
+
 # ------------------------------------------------------------------ 多把 key 取并集（分组密钥）
 
 class _FakeHTTPByKey:

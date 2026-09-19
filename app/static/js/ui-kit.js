@@ -45,6 +45,23 @@
 
   UI.fmtMs = (v) => (v == null ? '—' : (v >= 1000 ? (v / 1000).toFixed(1) + 's' : Math.round(v) + 'ms'));
 
+  /** 字节 → 可读体积（1.2GB / 512MB）。 */
+  UI.fmtBytes = (v) => {
+    if (v == null || isNaN(v)) return '—';
+    const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let n = Number(v), i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n : n.toFixed(n >= 100 ? 0 : 1)) + u[i];
+  };
+
+  /** 秒 → 「3天4小时5分」（服务器运行时长）。 */
+  UI.fmtDur = (sec) => {
+    if (sec == null || isNaN(sec)) return '—';
+    if (sec < 60) return Math.floor(sec) + '秒';
+    const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+    return (d ? d + '天' : '') + ((d || h) ? h + '小时' : '') + m + '分';
+  };
+
   UI.cur = (u) => (u === 'CNY' ? '¥' : '$');
   UI.money = (v, u) => (v == null ? '—' : UI.cur(u) + Number(v).toFixed(2));
 

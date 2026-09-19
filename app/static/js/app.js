@@ -7,7 +7,8 @@
  * 组件展示页 /ui-kit。改样式前先看规范，不要在业务里写行内样式。
  */
 const $ = UI.$, $$ = UI.$$, esc = UI.esc, fmtTime = UI.fmtTime, timeAgo = UI.timeAgo,
-      fmtMs = UI.fmtMs, cur = UI.cur, money = UI.money;
+      fmtMs = UI.fmtMs, cur = UI.cur, money = UI.money, bar = UI.bar,
+      fmtBytes = UI.fmtBytes, fmtDur = UI.fmtDur;
 
 const state = {plugins: [], providers: [], siteTypes: [], sites: [], tokens: [],
                trend: 'hourly', auto: true, view: 'overview',
@@ -2023,8 +2024,49 @@ const act = {
         enc.broken ? 'ti-shield-exclamation' : 'ti-shield-lock',
         enc.broken ? 'err' : (enc.plaintext ? 'warn' : 'ok')),
     ].join('');
+    // 服务器信息（只读探测，零网络）：/api/sysinfo 的 server 字段
+    const sv = d.server || {}, sc = sv.cpu || {}, sm = sv.mem || {}, sd = sv.disk || {}, su = sv.uptime || {};
+    const useTone = (p) => (p >= 90 ? 'err' : 'ok');
+    // 用量行：进度条 + 「已用 / 总量（百分比）」，窄屏自动上下排（用现有 .grid2，不新增样式）
+    const useRow = (label, o, extra) => row(label,
+      `<div class="grid2">${bar(o.percent || 0, useTone(o.percent || 0))}`
+      + `<div><span class="mono">${fmtBytes(o.used)} / ${fmtBytes(o.total)}</span>`
+      + ` <span class="chip">${o.percent || 0}%</span>`
+      + (extra ? `<div class="hint">${extra}</div>` : '') + '</div></div>');
+    const serverBlock = sv.hostname ? `
+      <div class="grid2">
+        <div>
+          <div class="set-sec-t"><i class="ti ti-cpu"></i>服务器</div>
+          ${kv([
+            row('主机名', `<span class="mono">${esc(sv.hostname)}</span>`),
+            row(sv.docker ? '容器系统' : '系统', esc(sv.os || '—')
+              + (sv.kernel ? ` <span class="chip mono">${sv.docker ? '宿主内核' : '内核'} ${esc(sv.kernel)}</span>` : '')
+              + (sv.arch ? ` <span class="chip mono">${esc(sv.arch)}</span>` : '')),
+            row('CPU', `<b>${sc.count || '—'}</b> 核`
+              + (sc.quota ? ` <span class="chip">容器上限 ${sc.quota} 核</span>` : '')
+              + (sc.model ? `<div class="hint">${esc(sc.model)}</div>` : '')),
+            (sc.load && sc.load.length) ? row('负载（1 / 5 / 15 分钟）', `<span class="mono">${sc.load.join(' / ')}</span>`) : '',
+            su.host ? row('运行时长', fmtDur(su.host) + ` <span class="hint">（本服务已运行 ${fmtDur(su.process)}）</span>`) : '',
+            row('时区 / 服务器时间', esc(sv.tz || '—')
+              + (sv.now_str ? ` <span class="mono">${esc(sv.now_str)}</span>` : '')
+              + ` <span class="hint">你本地 ${fmtTime(sv.now)}</span>`),
+            row('运行环境', (sv.docker ? pill('ok', 'Docker 容器') : pill('', '直接跑在主机上'))
+              + (sv.ip ? ` <span class="chip mono">${esc(sv.ip)}</span>` : '')),
+          ])}
+        </div>
+        <div>
+          <div class="set-sec-t"><i class="ti ti-activity"></i>资源</div>
+          ${kv([
+            sm.total ? useRow('内存', sm, sm.limit ? `容器上限 ${fmtBytes(sm.limit)}` : '') : '',
+            sd.total ? useRow('磁盘', sd, sd.path ? `数据目录 <span class="mono">${esc(sd.path)}</span>` : '') : '',
+            sv.dbfile ? row('数据文件', `<span class="mono">${fmtBytes(sv.dbfile)}</span>`) : '',
+            sv.python ? row('Python', `<span class="chip mono">${esc(sv.python)}</span>`) : '',
+          ])}
+        </div>
+      </div>` : '';
     $('#sysinfo').innerHTML = `
       <div class="cards">${tiles}</div>
+      ${serverBlock}
       <div class="grid2">
         <div>
           <div class="set-sec-t"><i class="ti ti-server-2"></i>环境</div>

@@ -15,7 +15,7 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from . import balances, channels, crypto, imagehost, plugindoc, pluginstore, protocols, relay, store, utils
+from . import balances, channels, crypto, imagehost, plugindoc, pluginstore, protocols, relay, store, sysinfo, utils
 
 router = APIRouter(prefix="/api")
 
@@ -1309,6 +1309,8 @@ def api_sysinfo(request: Request):
             "plugins": channels.available_ids(), "plugin_errors": channels.ERRORS,
             # 阶段 1：并发闸门 + 路由决策参数（控制台「系统信息」页直接展示）
             "gate": relay.gate.stats(),
+            # 服务器信息（设置页「服务器」区块）：只读探测，零网络
+            "server": sysinfo.collect(store.DB_PATH),
             "router": {"max_attempts": relay.MAX_ROUTE_ATTEMPTS,
                        "retryable": list(relay.RETRYABLE),
                        "global_limit": relay.GLOBAL_LIMIT}}
