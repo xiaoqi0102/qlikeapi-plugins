@@ -37,6 +37,21 @@
 - 实测（真实 DOM）：同步后白名单 5 个图片模型 ✓、下方预览 chips 0 个 ✓、只一行过滤提示 ✓；
   点「显示全部」白名单变 17 个（含 seedance）✓、下方提示清空 ✓；无 JS 报错 ✓。
 
+### 修正：只认 base64 的渠道，客户端给的参考图 URL 会被下载内联（aicost gpt-image-2 编辑面 400）
+- 用户实测：走网关调 aicost 的 `gpt-image-2` 改图，客户端**直接给公网 URL**（如 `https://i.ibb.co/...`），
+  上游回 400「输入的图片有误，请确认图片格式/链接是否正确」。网关日志证实发出去的 `image` 字段就是那条 URL。
+- 零成本探针（aicost `/v1/images/edits`）定性：参考图给 **URL → 400**；给 **data URI / 裸 base64 → 200 正常出图**。
+  → aicost 的 image2 面**只吃 base64**，插件原先声明 `"both"` 是错的。
+- 插件：`aicost.ref_input_faces` 两面都改成 `base64`，`declared_ref_input()` 恒回 `base64`；`protocol_note` 写清依据。
+- 网关：新增**反方向**转换 `imagehost.inline_url_refs()` / `fetch_ref()` / `to_data_uri()` ——
+  客户端给公网 URL 时**下载进内存**（不落盘、不转存）换成 `data:<mime>;base64,…`；
+  `relay.prepare()` 对 `policy == "base64"` 的渠道走这条路，下载失败**本地 400 带明细**（不把注定失败的 URL 丢给上游）。
+  顺带把「按值替换参考图字段」抽成 `_replace_ref_values()`，两个方向共用。
+- 实测（零成本 dry-run `POST /up/aicost/v1/images/edits/preview`）：用户那条报文现在发给 aicost 的
+  `image` 已是 `data:image/jpeg;base64,…` ✓。
+- ⚠️ 探针 B/C 本以为非法 `size` 会先被拒，实际被接受并**真出图成功**（2 张，aicost 余额 1.0715 → 1.051，约 $0.0205）。
+  记在案：探针要挑**必然 400** 的字段，别拿 size 当挡箭牌。
+
 ## v3.15.2 — 2026-09-18
 
 ### 修正：CI 变红（文档防漂移校验失败）

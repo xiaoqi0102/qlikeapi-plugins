@@ -245,7 +245,13 @@ def prepare(p: dict, body: dict, edit: bool) -> tuple[str, dict, dict]:
         raise ValueError(f"渠道插件 '{p.get('protocol')}' 未注册（可用：{', '.join(channels.available_ids())}）")
     notes: list[dict] = []
     policy = ch.ref_policy(p, body, edit)
-    if policy != "base64":
+    if policy == "base64":
+        # 只认 base64 的渠道（如 aicost 的 gpt-image-2 编辑面）：客户端给的公网 URL 先下载内联成
+        # data URI（内存里做，不落盘）；下载不到就本地报错，别把注定失败的 URL 丢给上游。
+        body, fail, notes = imagehost.inline_url_refs(body, None, edit)
+        if fail:
+            raise ChannelError("参考图转换失败（URL → base64）：" + "；".join(fail)[:300])
+    else:
         try:
             body, _fail, notes = imagehost.apply_to_body(body, policy, None, edit)
         except imagehost.UploadFailed as exc:

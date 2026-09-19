@@ -278,3 +278,42 @@ def test_save_settings_keeps_key_when_blank(db):
     assert ih.settings()["imgbb_key"] == "k1"
     ih.save_settings({"imgbb_key_clear": True})
     assert ih.settings()["imgbb_key"] == ""
+
+
+# ------------------------------------------------------------------ 下载内联（URL → base64）
+
+def test_inline_url_refs_downloads_and_inlines(transport):
+    """只认 base64 的渠道：公网 URL → 下载 → data URI（给 aicost 的 gpt-image-2 编辑面用）。"""
+    body = {"model": "gpt-image-2", "prompt": "x", "image": ["https://i.ibb.co/abc/ref.png"]}
+    out, fail, notes = ih.inline_url_refs(body, _cfg())
+    assert fail == [] and notes and notes[0]["mode"] == "inline"
+    v = out["image"][0]
+    assert v.startswith("data:image/png;base64,")
+    assert base64.b64decode(v.split(",", 1)[1]) == PNG
+    assert "https://i.ibb.co/abc/ref.png" not in json.dumps(out)     # 原 URL 已被替换
+    assert [s["method"] for s in transport] == ["GET"]               # 只下载，不上传
+
+
+def test_inline_url_refs_keeps_base64_untouched(transport):
+    """客户端本来就给 base64 / data URI → 原样保留，一个请求都不发。"""
+    body = {"image": DATA_URI, "images": [PNG_B64]}
+    out, fail, notes = ih.inline_url_refs(body, _cfg())
+    assert out == body and fail == [] and notes == []
+    assert transport == []
+
+
+def test_inline_url_refs_reports_download_failure(monkeypatch):
+    """下载失败 → 记进 failures 并**保留原值**（由 relay 决定本地报错）。"""
+    monkeypatch.setattr(ih, "TRANSPORT", httpx.MockTransport(lambda r: httpx.Response(404, text="gone")))
+    body = {"image": ["https://i.ibb.co/gone.png"]}
+    out, fail, notes = ih.inline_url_refs(body, _cfg())
+    assert fail and "404" in fail[0] and notes == []
+    assert out["image"] == ["https://i.ibb.co/gone.png"]
+
+
+def test_inline_url_refs_rejects_non_image_download(monkeypatch):
+    monkeypatch.setattr(ih, "TRANSPORT", httpx.MockTransport(
+        lambda r: httpx.Response(200, text="<html>not an image</html>",
+                                 headers={"content-type": "text/html"})))
+    out, fail, _ = ih.inline_url_refs({"image": ["https://i.ibb.co/x"]}, _cfg())
+    assert fail and "不是图片" in fail[0]

@@ -99,9 +99,9 @@ operations = {"generate": "queue", "edit": "queue"}
 
 | 值 | 含义 | 谁负责转换 |
 |---|---|---|
-| `url` | 只认公网 URL（如七牛 fal 异步队列） | 网关在图床层转好再交给你；图床不可用 → 本地 400 |
+| `url` | 只认公网 URL（如七牛 fal 异步队列） | 网关在图床层把 base64 上传换直链；图床不可用 → 本地 400 |
 | `both` | URL / base64 都支持 | 优先公网 URL，图床挂了回落 base64 |
-| `base64` | 只认 base64（如 Gemini `inlineData`） | 不转，原样透传 |
+| `base64` | 只认 base64（如 Gemini `inlineData`、aicost 的 gpt-image-2 编辑面） | 客户端给 URL → 网关**下载内联**成 data URI；给 base64 → 原样透传 |
 
 合并插件（一个渠道按模型分流到多个「面」）重写 `declared_ref_input()` 按面细化。
 细节、图床候选链、加图床的步骤见 [`IMAGEHOST.md`](IMAGEHOST.md)。

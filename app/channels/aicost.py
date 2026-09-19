@@ -52,8 +52,10 @@ class Aicost(Channel):
     vendor = "aicost.me"
     docs = "https://www.aicost.me"
     hint = "同一站点按模型自动分流：gemini 系走 generateContent，gpt-image 系走 /v1/images/*"
-    protocol_note = ("new-api 系站点自有口径：两套协议都吃 Bearer。gemini 面参考图走 inlineData(base64)；"
-                     "image2 面除 URL/base64 外也吃 multipart。image2 面的 n/quality/output_format/moderation "
+    protocol_note = ("new-api 系站点自有口径：两套协议都吃 Bearer。**两面参考图都只吃 base64**"
+                     "（gemini 面走 inlineData、image2 面走 image 字段；公网 URL 一律拒 —— "
+                     "实测 400「输入的图片有误」，网关会自动把 URL 下载内联成 data URI）。"
+                     "image2 面的 n/quality/output_format/moderation "
                      "是站点方「必填」字段，本插件缺省时按文档补默认值（客户端显式给了就听客户端的）。")
     default_auth = "bearer"
     default_base_url = "https://www.aicost.me"
@@ -69,12 +71,13 @@ class Aicost(Channel):
         "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image-preview",
     }
 
-    # 参考图形态按「面」声明：gemini 面只吃 inlineData（base64）；image2 面 URL / base64 都吃
-    ref_input_faces = {"gemini 面": "base64", "image2 面": "both"}
+    # 参考图形态按「面」声明：**两面都只吃 base64**（裸 base64 或 data URI）。
+    # 实测 2026-09-19：gpt-image-2 编辑面传公网 URL → 400「输入的图片有误，请确认图片格式/链接是否正确」；
+    # 传裸 base64 / data URI → 200 正常出图。（网关会给只认 base64 的渠道把 URL 下载内联成 data URI。）
+    ref_input_faces = {"gemini 面": "base64", "image2 面": "base64"}
 
     def declared_ref_input(self, p: dict, body: dict, edit: bool) -> str:
-        up_model = self.up_model(p, body.get("model") or "")
-        return "base64" if self.face_of(up_model) == "gemini_native" else "both"
+        return "base64"
 
     def up_model(self, p: dict, client_model: str) -> str:
         """上游真实模型名。

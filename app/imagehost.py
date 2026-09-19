@@ -35,7 +35,7 @@ import uuid
 
 import httpx
 
-from . import crypto, store
+from . import crypto, store, utils
 
 UA = "qlikeapi-plugins/1.0 (+https://github.com/xiaoqi0102/qlikeapi-plugins)"
 
@@ -429,23 +429,52 @@ def ensure_refs(refs: list[str], policy: str, cfg: dict | None = None,
     return out, failures, notes
 
 
-def apply_to_body(body: dict, policy: str, cfg: dict | None = None,
-                  edit: bool = False) -> tuple[dict, list[str], list[dict]]:
-    """就地把 body 里所有参考图字段的 base64 换成图床直链（保持原字段结构）。
+# ------------------------------------------------------------------ 下载内联（URL → base64）
 
-    替换按**值**匹配（原值 → 新值），不按位置：同一个字段里混着 URL、base64、
-    甚至非图片字符串时也不会串位。
-    """
-    from . import utils
-    if policy == "base64":
-        return body, [], []
-    refs = utils.collect_refs(body)
-    if not refs:
-        return body, [], []
-    new_refs, failures, notes = ensure_refs(refs, policy, cfg, edit)
-    mapping = {o: n for o, n in zip(refs, new_refs, strict=False) if o != n}
+MAX_INLINE_MB = 20.0
+
+
+def fetch_ref(url: str, cfg: dict | None = None, client: httpx.Client | None = None) -> tuple[str, bytes]:
+    """下载公网参考图（**内存里，不落盘**），返回 (mime, 原始字节)。"""
+    if not is_public_url(url):
+        raise NotAnImage("参考图不是公网 http(s) 直链")
+    cfg = cfg or settings()
+    own = client is None
+    c = client or _client(cfg)
+    try:
+        r = c.get(url)
+        if r.status_code >= 400:
+            raise NotAnImage(f"下载参考图失败 HTTP {r.status_code}")
+        raw = r.content
+        if not raw:
+            raise NotAnImage("下载到的参考图是空的")
+        cap = float(cfg.get("max_mb") or MAX_INLINE_MB)
+        if len(raw) > cap * 1024 * 1024:
+            raise NotAnImage(f"参考图超过 {cap:g}MB")
+        mime = (r.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if not mime.startswith("image/"):
+            mime = sniff_mime(raw) or ""
+        if not mime.startswith("image/"):
+            raise NotAnImage("下载到的不是图片（Content-Type 与文件头都不像）")
+        return mime, raw
+    except NotAnImage:
+        raise
+    except Exception as exc:
+        raise NotAnImage(f"{type(exc).__name__}: {exc}") from exc
+    finally:
+        if own:
+            c.close()
+
+
+def to_data_uri(url: str, cfg: dict | None = None, client: httpx.Client | None = None) -> str:
+    mime, raw = fetch_ref(url, cfg, client)
+    return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode())
+
+
+def _replace_ref_values(body: dict, mapping: dict[str, str]) -> None:
+    """按**值**就地替换参考图字段里的条目（同一个字段混着 URL / base64 也不会串位）。"""
     if not mapping:
-        return body, failures, notes
+        return
     for field in utils.REF_FIELDS:
         v = body.get(field)
         if v is None:
@@ -466,6 +495,49 @@ def apply_to_body(body: dict, policy: str, cfg: dict | None = None,
                 else:
                     out.append(it)
             body[field] = out
+
+
+def inline_url_refs(body: dict, cfg: dict | None = None,
+                    edit: bool = False) -> tuple[dict, list[str], list[dict]]:
+    """把参考图里的**公网 URL** 就地换成 data URI(base64) —— 给「只认 base64」的渠道用。
+
+    与 `apply_to_body` 方向相反：那边是 base64 → 图床直链（给只认 URL 的渠道），
+    这边是 URL → base64（给只认 base64 的渠道；实测 aicost 的 gpt-image-2 编辑面就是这种）。
+    下载在内存里做，不落盘、不转存；客户端本来就给 base64 / data URI 的原样保留。
+    """
+    refs = utils.collect_refs(body)
+    urls = [r for r in refs if is_http(r)]
+    if not urls:
+        return body, [], []
+    mapping: dict[str, str] = {}
+    failures: list[str] = []
+    notes: list[dict] = []
+    for u in dict.fromkeys(urls):
+        try:
+            mapping[u] = to_data_uri(u, cfg)
+            notes.append({"from": u, "to": "data:<base64>", "mode": "inline"})
+        except NotAnImage as exc:
+            failures.append(f"{u}: {exc}")
+    _replace_ref_values(body, mapping)
+    return body, failures, notes
+
+
+def apply_to_body(body: dict, policy: str, cfg: dict | None = None,
+                  edit: bool = False) -> tuple[dict, list[str], list[dict]]:
+    """就地把 body 里所有参考图字段的 base64 换成图床直链（保持原字段结构）。
+
+    替换按**值**匹配（原值 → 新值），不按位置：同一个字段里混着 URL、base64、
+    甚至非图片字符串时也不会串位。
+    """
+    from . import utils
+    if policy == "base64":
+        return body, [], []
+    refs = utils.collect_refs(body)
+    if not refs:
+        return body, [], []
+    new_refs, failures, notes = ensure_refs(refs, policy, cfg, edit)
+    mapping = {o: n for o, n in zip(refs, new_refs, strict=False) if o != n}
+    _replace_ref_values(body, mapping)
     return body, failures, notes
     idx = 0
     for field in utils.REF_FIELDS:

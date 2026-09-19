@@ -137,11 +137,13 @@ def poll(self, first, meta, headers, timeout=None) -> tuple[str, object]:
 
 | 值 | 什么时候用 | 网关行为 |
 |---|---|---|
-| `base64` | 上游文档说参考图必须是 base64（如 Gemini 的 `inlineData`） | 原样透传，**一个字节都不上传** |
+| `base64` | 上游文档说参考图必须是 base64（如 Gemini 的 `inlineData`、aicost 的 gpt-image-2 编辑面） | 客户端给 base64 → 原样透传；给**公网 URL → 下载内联**成 data URI（内存里，不落盘） |
 | `both` | 上游文档里公网 URL 和 base64 都写了 | 优先转成公网直链（图床挂了自动回落 base64，不失败） |
 | `url` | 上游文档说**只吃公网 URL**（如 fal 异步队列，它自己去拉图） | 必须转成公网直链；图床全挂 → 本地 400，**不硬发** |
 
-客户端本来就给 http(s) 链接时，任何档位都不会上传。
+客户端本来就给 http(s) 链接时：`url` / `both` 档位**原样透传**（不绕冤枉路）；
+`base64` 档位会**下载内联**（这类上游压根不吃 URL，实测 aicost 传 URL 会 400「输入的图片有误」）。
+下载失败（404 / 超时 / 不是图片 / 超过 `max_mb`）→ **本地 400** 并带上明细，别把注定失败的 URL 丢给上游。
 
 **别把 `url` 写成 `both`**：如果上游其实不吃 URL，客户端会拿到一张跟参考图无关的图。
 拿不准就写 `both`（有回落），并在 `protocol_note` 里写清依据。

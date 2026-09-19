@@ -242,10 +242,29 @@ def test_aicost_gemini_ref_image_goes_inline_base64():
 
 
 def test_aicost_declares_ref_input_per_face():
+    """实测 2026-09-19：gpt-image-2 编辑面传公网 URL → 400「输入的图片有误」；
+    裸 base64 / data URI → 200 正常出图 → 两面都必须声明 base64。"""
     ch = channels.get("aicost")
-    assert ch.info()["ref_input_faces"] == {"gemini 面": "base64", "image2 面": "both"}
+    assert ch.info()["ref_input_faces"] == {"gemini 面": "base64", "image2 面": "base64"}
     assert ch.declared_ref_input({"model_map": {}}, {"model": "gemini-3-pro-image"}, False) == "base64"
-    assert ch.declared_ref_input({"model_map": {}}, {"model": "gpt-image-2"}, False) == "both"
+    assert ch.declared_ref_input({"model_map": {}}, {"model": "gpt-image-2"}, False) == "base64"
+
+
+def test_aicost_edit_url_ref_is_inlined_to_base64(db, monkeypatch):
+    """只认 base64 的渠道：客户端给公网 URL，网关要下载内联成 data URI（内存里，不落盘）。"""
+    import httpx
+
+    from app import imagehost, relay
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40
+    monkeypatch.setattr(imagehost, "TRANSPORT",
+                        httpx.MockTransport(lambda r: httpx.Response(
+                            200, content=png, headers={"content-type": "image/png"})))
+    body = {"model": "gpt-image-2", "prompt": "x", "size": "1024x1024",
+            "image": ["https://i.ibb.co/abc/ref.png"]}
+    url, up, meta = relay.prepare(_aicost_p(), body, True)
+    assert url.endswith("/v1/images/edits")
+    assert up["image"][0].startswith("data:image/png;base64,")      # 原 URL 已被内联替换
+    assert meta["imagehost"][0]["mode"] == "inline"
 
 
 def test_aicost_parse_covers_documented_shapes():
