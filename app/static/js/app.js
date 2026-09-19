@@ -1671,6 +1671,14 @@ const act = {
       }).join('；');
     } catch (e) { return ''; }
   },
+  refNote(raw, reqTxt, upTxt) {
+    // 参考图说明：有转换就报转换（两个方向）；没转换但请求里带着 base64 参考图，也要说清楚「直传、网关没动它」。
+    // 之前只在转换过时才显示，导致 base64 直传的请求（用户日常流量）这一行整个不出现，看着像没做。
+    const conv = this.imagehostNote(raw);
+    if (conv) return conv;
+    const m = /<参考图 base64 数据，约 (\d+)KB>/.exec(String(upTxt || '') + String(reqTxt || ''));
+    return m ? `base64 直传（约 ${m[1]}KB，网关未转换）` : '';
+  },
   async logDetail(id) {
     const r = await api('/api/logs/' + id);
     if (!r) return;
@@ -1723,8 +1731,8 @@ const act = {
         <span class="chip mono">${esc(l.public_path || '')}</span>
       </div>
       ${l.error ? `<label class="form-label">错误</label><pre class="json mb-3">${esc(l.error)}</pre>` : ''}
-      ${act.imagehostNote(l.imagehost) ? `<div class="hint mb-3"><i class="ti ti-arrows-exchange"></i>
-        参考图转换：${act.imagehostNote(l.imagehost)}</div>` : ''}
+      ${act.refNote(l.imagehost, l.request_json, l.upstream_request) ? `<div class="hint mb-3"><i class="ti ti-arrows-exchange"></i>
+        ${act.imagehostNote(l.imagehost) ? '参考图转换' : '参考图'}：${act.refNote(l.imagehost, l.request_json, l.upstream_request)}</div>` : ''}
       ${curlBox('cli', '① 完整请求 · 客户端 → 本网关', cliRead, cliStrict)}
       ${curlBox('up', '② 完整请求 · 本网关 → 上游', upRead, upStrict)}
       <div class="hint mb-3">① 是客户端发来的入口形态（凭据已换成 YOUR_QLIKE_TOKEN）；② 是翻译后真正发给上游的报文
