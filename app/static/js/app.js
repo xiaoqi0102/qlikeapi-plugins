@@ -903,7 +903,7 @@ const act = {
         </div>
         <div class="col-md-8"><label class="form-label">渠道微调 options（JSON，可选）</label>
           <textarea class="form-control" id="fOptions">${esc(JSON.stringify(p?.options || {}, null, 2))}</textarea>
-          <div class="hint mt-1">drop_fields（支持点号路径，如 <code>generationConfig.thinkingConfig</code>）/ force_fields / generations_path / edits_path / image_size_override / drop_quality / gemini_size_policy（class|floor|nearest|ceil）/ size_mode（snap|passthrough）/ key_groups（模型→分组规则，如 {"gemini-*": "gemini"}，优先级高于自动探测结果）</div></div>
+          <div class="hint mt-1">drop_fields（支持点号路径，如 <code>generationConfig.thinkingConfig</code>）/ force_fields / generations_path / edits_path / image_size_override / drop_quality / gemini_size_policy（class|floor|nearest|ceil）/ size_mode（snap|passthrough）/ retry_on_4xx（true=上游 4xx 也换下一个渠道，用于「同一请求别家能成」的口径差异）/ key_groups（模型→分组规则，如 {"gemini-*": "gemini"}，优先级高于自动探测结果）</div></div>
         <div class="col-md-4">
           <label class="form-label">优先级<span class="hint"> 数字大者优先</span></label><input class="form-control mb-3" id="fPrio" type="number" value="${p?.priority ?? 0}">
           <label class="form-label">权重<span class="hint"> 同优先级内按权重分流</span></label><input class="form-control mb-3" id="fWeight" type="number" min="1" value="${p?.weight ?? 1}">

@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 import threading
 
 import pytest
@@ -142,6 +143,31 @@ def test_router_marks_degrade_when_falling_to_next_tier(client, make_provider, m
     assert r.headers["X-QLike-Degrade"] == "1"
     assert r.headers["X-QLike-Failover"] == "1"
     assert r.headers["X-QLike-Attempt"] == "2"
+
+
+def test_4xx_does_not_fail_over_by_default(client, make_provider, fake_upstream):
+    """400 = 请求本身有问题 → 默认只打一个渠道，不换家（避免无谓重试）。"""
+    make_provider(key="a", priority=20, model_map={"gpt-image-2": "gpt-image-2"})
+    make_provider(key="b", priority=10, model_map={"gpt-image-2": "gpt-image-2"})
+    calls = fake_upstream(400)
+    r = client.post("/v1/images/generations", json={"model": "gpt-image-2", "prompt": "x"}, headers=MASTER)
+    assert r.status_code == 400
+    assert len(calls) == 1                                    # 只打了首档，没有白试第二家
+    assert "prompt is required" in json.dumps(r.json(), ensure_ascii=False)
+
+
+def test_4xx_fails_over_when_channel_opts_in(client, make_provider, monkeypatch):
+    """渠道开了 options.retry_on_4xx → 400 也换下一个渠道（同一请求在别家能成的口径差异场景）。"""
+    make_provider(key="a", priority=20, model_map={"gpt-image-2": "gpt-image-2"},
+                  options={"retry_on_4xx": True})
+    make_provider(key="b", priority=10, model_map={"gpt-image-2": "gpt-image-2"})
+    seq = iter([(400, {"error": {"message": "输入的图片有误"}}, "bad image"),
+                (200, {"data": [{"url": "https://k.example.com/2.png"}]}, "ok")])
+    monkeypatch.setattr(protocols, "call_upstream", lambda *a, **k: next(seq))
+    r = client.post("/v1/images/generations", json={"model": "gpt-image-2", "prompt": "x"}, headers=MASTER)
+    assert r.status_code == 200
+    assert r.headers["X-QLike-Provider"] == "b"
+    assert r.headers["X-QLike-Failover"] == "1" and r.headers["X-QLike-Attempt"] == "2"
 
 
 def test_router_all_saturated_returns_503_with_retry_after(client, make_provider, monkeypatch, clean_gate):

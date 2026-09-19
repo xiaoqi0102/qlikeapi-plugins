@@ -65,6 +65,18 @@
 - 现状提醒：`QLIKEAPI_MAX_CONCURRENCY` 未设 = 并发不限；单张上限由图床配置 `max_mb`（默认 20MB）决定，
   峰值 ≈ 单张体积 ×2~3 × 并发数。要收紧就调这两个值，不用改代码。
 
+### 新增：渠道可选 `options.retry_on_4xx` —— 上游 4xx 也换下一个渠道
+- 用户问「aicost 都失败好几次了怎么不自动轮换到 change2pro？」→ 查清两条：
+  ① 他调的是 `/up/aicost/...`（**单渠道直连面**，设计上就钉死一个渠道、不轮换）；
+  ② 那 5 次失败是上游 **400**，而 `RETRYABLE` 名单是 `402/408/409/425/429/5xx/529`，**400 默认不换**
+  （"请求本身有问题直接返回，避免无谓重试"）；日志佐证 `attempts=1`。
+- 但这次的 400 本质是**渠道口径差异**（aicost 编辑面不吃 URL 参考图、change2pro 吃）→ 值得可配。
+  新增 `relay._retryable(p, status)`：默认行为不变，渠道实例开 `options.retry_on_4xx: true` 后 4xx 也换下一个渠道。
+  面板 options 提示已列出该键；已给 `aicost` 打开（`{"retry_on_4xx": true}`），要关就删掉该键。
+- 实测（零成本端到端：两个假上游 400/200 + 两个临时渠道，测完删干净）：
+  统一入口改图 → `HTTP 200`、`X-QLike-Provider: zz-4xx-b`、`X-QLike-Failover: 1`、`X-QLike-Attempt: 2` ✓。
+- 提醒：`/up/<渠道>/...` 直连面永远单渠道；要自动兜底请用统一入口 `/v1/images/edits`。
+
 ## v3.15.2 — 2026-09-18
 
 ### 修正：CI 变红（文档防漂移校验失败）

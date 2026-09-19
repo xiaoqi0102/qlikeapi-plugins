@@ -393,6 +393,20 @@ def _countable_failure(status: int | None) -> bool:
     return status in (401, 403, 402, 408, 429) or status >= 500
 
 
+def _retryable(p: dict, status: int | None) -> bool:
+    """这次上游结果要不要**换下一个渠道**。
+
+    默认只换「渠道类错误」（`RETRYABLE`：402/408/409/425/429/5xx/529）；
+    4xx 里的 400 通常意味着请求本身有问题，换家也一样失败，所以默认不换。
+    但有些 400 其实是**渠道口径差异**（同一个请求在别家能成，例如 aicost 的编辑面不吃 URL 参考图、
+    change2pro 却吃），渠道实例开 `options.retry_on_4xx` 后 4xx 也换渠道。
+    """
+    if status in RETRYABLE:
+        return True
+    opt = (p or {}).get("options") or {}
+    return bool(opt.get("retry_on_4xx")) and status is not None and 400 <= status < 500
+
+
 def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
                     log_kind: str = "relay", do_log: bool = True) -> tuple[dict | JSONResponse, dict]:
     """把请求打到一个渠道实例上（含 key 轮换重试），返回 (结果 或 错误响应, 元信息).
@@ -777,7 +791,7 @@ def _handle_router(request: Request, edit: bool):
             detail = {}
         status = out.status_code
         last = (p["key"], status, str(detail.get("message") or ""))
-        if status not in RETRYABLE:      # 非渠道类错误（请求本身有问题）直接返回，避免无谓重试
+        if not _retryable(p, status):    # 非渠道类错误（请求本身有问题）直接返回，避免无谓重试
             return out
 
     if not tried and saturated:
