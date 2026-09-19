@@ -377,13 +377,24 @@ def _size_info(meta: dict) -> dict:
 
 
 def _imagehost_info(meta: dict) -> dict:
-    """图床转换结果：响应头只放 ASCII（host 名 + 张数），中文说明走日志详情。"""
-    notes = [n for n in ((meta or {}).get("imagehost") or []) if n.get("host")]
-    if not notes:
+    """参考图形态转换结果 —— **两个方向都报**：
+
+    · `base64 → 公网直链`（上传图床，给只认 URL 的渠道）
+    · `URL → 内联 base64`（下载内联，给只认 base64 的渠道，如 aicost）
+
+    响应头只放 ASCII（host 名 / inline + 张数），中文说明走日志详情与响应 JSON。
+    """
+    notes = (meta or {}).get("imagehost") or []
+    ups = [n for n in notes if n.get("host")]
+    ins = [n for n in notes if n.get("mode") == "inline"]
+    if not ups and not ins:
         return {}
-    hosts = list(dict.fromkeys(n["host"] for n in notes))
-    return {"imagehost": ",".join(hosts), "imagehost_n": len(notes),
-            "imagehost_note": "；".join(f"参考图 {n['bytes'] // 1024}KB → {n['host']}" for n in notes)}
+    hosts = list(dict.fromkeys(n["host"] for n in ups))
+    parts = [f"参考图 {n['bytes'] // 1024}KB → 图床直链（{n['host']}）" for n in ups]
+    parts += [f"参考图 URL → 内联 base64（{n['bytes'] // 1024}KB）" for n in ins]
+    return {"imagehost": ",".join(hosts + (["inline"] if ins else [])),
+            "imagehost_n": len(ups) + len(ins),
+            "imagehost_note": "；".join(parts)}
 
 
 def _countable_failure(status: int | None) -> bool:
@@ -463,7 +474,8 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
                               int((time.time() - t0) * 1000), msg, body, up_body, up_text,
                               kind=log_kind, attempts=attempt, key_index=idx,
                               token=tk_name, token_id=tk_id,
-                              up_url=url, up_method="POST", up_headers=_redact_headers(headers, secret))
+                              up_url=url, up_method="POST", up_headers=_redact_headers(headers, secret),
+                              imagehost=(meta or {}).get("imagehost"))
             if _countable_failure(status):          # 渠道级失败计数（够数自动停用）
                 store.bump_provider_fail(provider, f"上游 {status}: {msg[:160]}", disconnect=True)
             return JSONResponse({"error": {"message": f"upstream {status}: {msg}", "type": "upstream_error",
@@ -484,7 +496,8 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
                           json.dumps(out, ensure_ascii=False)[:1200], kind=log_kind,
                           attempts=attempt, key_index=idx, images=images, cost=cost, cost_currency=currency,
                           token=tk_name, token_id=tk_id,
-                          up_url=url, up_method="POST", up_headers=_redact_headers(headers, secret))
+                          up_url=url, up_method="POST", up_headers=_redact_headers(headers, secret),
+                          imagehost=(meta or {}).get("imagehost"))
         return out, {"ms": int((time.time() - t0) * 1000), "upstream_status": status,
                      "images": images, "cost": cost, "currency": currency, "attempts": attempt,
                      **_size_info(meta), **_imagehost_info(meta)}

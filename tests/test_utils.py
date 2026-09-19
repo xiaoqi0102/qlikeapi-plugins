@@ -171,9 +171,9 @@ def test_compact_b64_only_shortens_long_payloads():
     """日志里的长 base64 / data URI 换成占位符；短字符串与普通文本一律不动。"""
     from app import utils
     long_b64 = "A" * 600
-    assert utils.compact_b64({"image": [long_b64]}) == {"image": ["<base64:600 bytes>"]}
+    assert utils.compact_b64({"image": [long_b64]}) == {"image": ["<参考图 base64 数据，约 1KB>"]}
     assert utils.compact_b64({"image": ["data:image/png;base64," + long_b64]}) == {
-        "image": ["<base64:%d bytes>" % (22 + 600)]}
+        "image": ["<参考图 base64 数据，约 1KB>"]}
     keep = {"model": "gpt-image-2", "prompt": "猫", "image": ["https://i.ibb.co/x.png"], "n": 1}
     assert utils.compact_b64(keep) == keep
     assert utils.compact_b64({"images": ["QUJD"]}) == {"images": ["QUJD"]}      # 短的照样留着

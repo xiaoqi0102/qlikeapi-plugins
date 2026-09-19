@@ -1661,6 +1661,16 @@ const act = {
     </div>`;
   },
 
+  imagehostNote(raw) {
+    // 参考图形态转换说明：两个方向都显示（URL → 内联 base64 / base64 → 图床直链）
+    try {
+      const ns = JSON.parse(raw || '[]') || [];
+      return ns.map(n => {
+        const kb = Math.max(1, Math.round((n.bytes || 0) / 1024));
+        return n.mode === 'inline' ? `URL → 内联 base64（约 ${kb}KB）` : `约 ${kb}KB → 图床直链（${n.host || ''}）`;
+      }).join('；');
+    } catch (e) { return ''; }
+  },
   async logDetail(id) {
     const r = await api('/api/logs/' + id);
     if (!r) return;
@@ -1713,6 +1723,8 @@ const act = {
         <span class="chip mono">${esc(l.public_path || '')}</span>
       </div>
       ${l.error ? `<label class="form-label">错误</label><pre class="json mb-3">${esc(l.error)}</pre>` : ''}
+      ${act.imagehostNote(l.imagehost) ? `<div class="hint mb-3"><i class="ti ti-arrows-exchange"></i>
+        参考图转换：${act.imagehostNote(l.imagehost)}</div>` : ''}
       ${curlBox('cli', '① 完整请求 · 客户端 → 本网关（入口形态，凭据已换成 YOUR_QLIKE_TOKEN）', cliRead, cliStrict)}
       ${curlBox('up', '② 完整请求 · 本网关 → 上游（翻译后的报文，凭据已换成 YOUR_API_KEY，可直接复制去实测）', upRead, upStrict)}
       <div class="hint mb-3">「提示词多行」把 JSON 字符串里的 \\n 还原成真实换行，方便读；要直接粘贴执行请切「严格 JSON」。</div>

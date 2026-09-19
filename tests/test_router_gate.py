@@ -145,6 +145,29 @@ def test_router_marks_degrade_when_falling_to_next_tier(client, make_provider, m
     assert r.headers["X-QLike-Attempt"] == "2"
 
 
+def test_imagehost_info_covers_both_directions():
+    """参考图转换说明：两个方向都要报（base64→图床直链 / URL→内联 base64）。"""
+    meta = {"imagehost": [
+        {"host": "imgbb", "bytes": 204800},
+        {"mode": "inline", "from": "https://x/a.jpg", "bytes": 512000, "mime": "image/jpeg"}]}
+    info = relay._imagehost_info(meta)
+    assert info["imagehost"] == "imgbb,inline" and info["imagehost_n"] == 2
+    assert "200KB → 图床直链（imgbb）" in info["imagehost_note"]
+    assert "URL → 内联 base64（500KB）" in info["imagehost_note"]
+    assert relay._imagehost_info({}) == {}                       # 没转换就不出现
+
+
+def test_log_row_records_imagehost_note(db):
+    """转换说明要落到日志里（面板「日志详情」据此显示「参考图转换」一行）。"""
+    db.log_row("a", "m", "/v1/images", 200, 200, 12, None, {"model": "m"}, {"model": "m"}, "{}")
+    db.log_row("a", "m", "/v1/images", 200, 200, 12, None, {"model": "m"}, {"model": "m"}, "{}",
+               imagehost=[{"mode": "inline", "from": "https://x/a.jpg", "bytes": 1024,
+                           "mime": "image/png"}])
+    assert db.one("SELECT imagehost FROM logs WHERE imagehost IS NULL") is not None   # 没转换的行不受影响
+    row = db.one("SELECT imagehost FROM logs WHERE imagehost IS NOT NULL")
+    assert row is not None and "inline" in row["imagehost"]
+
+
 def test_4xx_does_not_fail_over_by_default(client, make_provider, fake_upstream):
     """400 = 请求本身有问题 → 默认只打一个渠道，不换家（避免无谓重试）。"""
     make_provider(key="a", priority=20, model_map={"gpt-image-2": "gpt-image-2"})

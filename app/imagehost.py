@@ -521,8 +521,9 @@ def inline_url_refs(body: dict, cfg: dict | None = None,
     notes: list[dict] = []
     for u in dict.fromkeys(urls):
         try:
-            mapping[u] = to_data_uri(u, cfg)
-            notes.append({"from": u, "to": "data:<base64>", "mode": "inline"})
+            mime, raw = fetch_ref(u, cfg)
+            mapping[u] = "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode())
+            notes.append({"mode": "inline", "from": u, "bytes": len(raw), "mime": mime})
         except NotAnImage as exc:
             failures.append(f"{u}: {exc}")
     _replace_ref_values(body, mapping)

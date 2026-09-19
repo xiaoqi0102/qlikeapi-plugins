@@ -369,7 +369,7 @@ def compact_b64(obj: Any, limit: int = 512) -> Any:
     if isinstance(obj, str):
         s = obj.strip()
         if len(s) > limit and (s.startswith("data:") or _B64_RE.fullmatch(s)):
-            return "<base64:%d bytes>" % len(s)
+            return "<参考图 base64 数据，约 %dKB>" % max(1, len(s) * 3 // 4 // 1024)
         return obj
     if isinstance(obj, dict):
         return {k: compact_b64(v, limit) for k, v in obj.items()}

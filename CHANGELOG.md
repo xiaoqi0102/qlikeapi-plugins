@@ -77,6 +77,19 @@
   统一入口改图 → `HTTP 200`、`X-QLike-Provider: zz-4xx-b`、`X-QLike-Failover: 1`、`X-QLike-Attempt: 2` ✓。
 - 提醒：`/up/<渠道>/...` 直连面永远单渠道；要自动兜底请用统一入口 `/v1/images/edits`。
 
+### 改进：日志里「参考图转换」两个方向都记，且不再是一串英文占位
+- 用户口径：「保留，URL 转 base64 还是 base64 转 URL 都显示」。
+- `logs` 表新增 `imagehost` 列（自动迁移，老行留空）：存转换明细
+  `[{"mode":"inline","from":"<原URL>","bytes":383357,"mime":"image/jpeg"}]` /
+  `[{"host":"imgbb","bytes":204800}]`。面板「日志详情」据此多显示一行
+  **参考图转换：URL → 内联 base64（约 374KB）** 或 **约 200KB → 图床直链（imgbb）**。
+- `relay._imagehost_info()` 两个方向都报（之前只报上传方向、内联方向被过滤掉了）；
+  响应头 `X-QLike-Imagehost` 相应变成 `imgbb` / `inline` / `imgbb,inline`。
+- 日志里的长 base64 占位符从 `<base64:511167 bytes>` 改成中文
+  `<参考图 base64 数据，约 374KB>`（一眼看懂，仍不存图）。
+- 实测（零成本端到端，假上游 + 临时渠道，测完删干净）：`X-QLike-Imagehost: inline`；
+  日志 `upstream_request` 里 image 字段为 `<参考图 base64 数据，约 374KB>`；`imagehost` 列记下 from/bytes/mime ✓。
+
 ## v3.15.2 — 2026-09-18
 
 ### 修正：CI 变红（文档防漂移校验失败）
