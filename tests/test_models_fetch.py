@@ -153,6 +153,7 @@ def test_sysinfo_exposes_server_info(login):
     assert s["hostname"] and s["python"]
     assert s["mem"]["total"] > 0 and s["disk"]["total"] > 0
     assert set(s["uptime"]) == {"host", "process"}
+    assert s["cpu"]["usage"] is None or 0 <= s["cpu"]["usage"] <= 100
 
 
 # ------------------------------------------------------------------ 多把 key 取并集（分组密钥）

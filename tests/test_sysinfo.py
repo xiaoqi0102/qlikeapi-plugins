@@ -32,6 +32,14 @@ def test_collect_without_db_path(tmp_path):
     assert d["disk"]["total"] > 0                 # 退化成 /
 
 
+def test_cpu_usage_needs_two_samples():
+    """CPU 占用率靠两次采样差值：第一次没基准 → None，第二次是 0~100 的整数。"""
+    first = sysinfo._cpu_usage()
+    assert first is None or 0 <= first <= 100
+    second = sysinfo._cpu_usage()
+    assert second is None or 0 <= second <= 100
+
+
 def test_helpers_never_raise():
     assert sysinfo._read("/no/such/file/at/all") == ""
     assert sysinfo._cgroup_mem_limit() is None or sysinfo._cgroup_mem_limit() > 0

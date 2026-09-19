@@ -95,6 +95,28 @@ def _cpu_model() -> str:
     return ""
 
 
+_CPU_LAST = {"idle": 0, "total": 0}
+
+
+def _cpu_usage() -> int | None:
+    """两次调用之间的 CPU 占用率（%）。首次调用没有基准 → None（前端自动不显示）。"""
+    try:
+        vals = [int(x) for x in _read("/proc/stat").splitlines()[0].split()[1:]]
+    except (ValueError, IndexError):
+        return None
+    if len(vals) < 4:
+        return None
+    idle = vals[3] + (vals[4] if len(vals) > 4 else 0)      # idle + iowait
+    total = sum(vals)
+    prev = dict(_CPU_LAST)
+    _CPU_LAST.update(idle=idle, total=total)
+    dt = total - prev["total"]
+    if not prev["total"] or dt <= 0:
+        return None
+    busy = dt - (idle - prev["idle"])
+    return max(0, min(100, round(busy * 100 / dt)))
+
+
 def _load() -> list[float] | None:
     try:
         return [round(x, 2) for x in os.getloadavg()]
@@ -157,7 +179,7 @@ def collect(db_path: str = "") -> dict:
         "now": int(now),
         "now_str": time.strftime("%Y-%m-%d %H:%M:%S"),   # 服务器本地时间（和 tz 同一个时区）
         "cpu": {"count": os.cpu_count() or 0, "model": cpu_model,
-                "load": _load(), "quota": _cgroup_cpu_quota()},
+                "load": _load(), "quota": _cgroup_cpu_quota(), "usage": _cpu_usage()},
         "mem": {**_mem(), "limit": _cgroup_mem_limit()},
         "disk": _disk(os.path.dirname(db_path) if db_path else "/"),
         "uptime": {"host": _uptime(), "process": int(now - START)},

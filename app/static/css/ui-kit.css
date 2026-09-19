@@ -908,6 +908,16 @@ body.dark .kit-code{background:var(--bg);border-color:var(--line)}
    运行信息 → 顶部指标卡 + 左右两栏键值表；图床 → 服务对照表 + 参数区；密码/规范并排。 */
 .set-sec-t{display:flex;align-items:center;gap:6px;font-size:var(--fs-sm);font-weight:600;color:var(--ink-3);
   letter-spacing:.03em;margin:0 0 var(--sp-2);padding-bottom:var(--sp-1);border-bottom:1px solid var(--line)}
+
+/* 设置页信息区块：底部收一条分隔线（表内最后一行不画线，由它收口） */
+.set-sec{border-bottom:1px solid var(--line);padding-bottom:var(--sp-3)}
+
+/* 四列键值表（「服务器 + 资源」「环境 + 运行策略」）：左右两组各占「标签 + 值」两列，
+   两半共用同一批行 → 行分隔线天然对齐；表头两格各跨两列，当区块小标题用 */
+table.tb.kv.kv2 th{width:14%;min-width:72px}
+table.tb.kv.kv2 td{width:36%}
+table.tb.kv.kv2 thead th{background:transparent;position:static;color:var(--ink-3);font-weight:600;letter-spacing:.03em}
+table.tb.kv.kv2 tbody tr:last-child th{border-bottom:0}
 table.tb.kv{margin:0}
 table.tb.kv th{width:33%;min-width:96px;color:var(--muted);font-weight:550;font-size:var(--fs-sm);vertical-align:top}
 table.tb.kv td{padding:9px 12px}

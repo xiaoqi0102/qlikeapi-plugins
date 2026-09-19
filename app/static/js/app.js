@@ -128,6 +128,81 @@ window.addEventListener('hashchange', () => show(location.hash.slice(1) || 'over
 const MODE = {native:['info','原生透传'], converted:['warn','本服务翻译'], queue:['info','异步队列'], unsupported:['err','不支持']};
 const pill = UI.pill;
 const ratePill = (rate, n) => n ? pill(rate >= 99 ? 'ok' : rate >= 90 ? 'warn' : 'err', rate + '%') : '<span class="pill">—</span>';
+
+/* ---------------- 设置页「服务器 / 资源」区块（含实时刷新） ---------------- */
+// 一张四列键值表：左半「服务器」、右半「资源」。两半共用同一批行 → 行分隔线天然对齐，
+// 底部再收一条 .set-sec 的分隔线。行内容用 [标签, 值] 二元组表示。
+const pairRows = (a, b) => {
+  const n = Math.max(a.length, b.length);
+  let h = '';
+  for (let i = 0; i < n; i++) {
+    const x = a[i], y = b[i];
+    h += '<tr>' + (x ? `<th>${x[0]}</th><td>${x[1]}</td>` : '<th></th><td></td>')
+      + (y ? `<th>${y[0]}</th><td>${y[1]}</td>` : '<th></th><td></td>') + '</tr>';
+  }
+  return h;
+};
+const pairBlock = (t1, i1, t2, i2, a, b, id) =>
+  `<div class="set-sec"><table class="tb kv kv2"><thead><tr>`
+  + `<th colspan="2"><i class="ti ${i1}"></i>${t1}</th><th colspan="2"><i class="ti ${i2}"></i>${t2}</th>`
+  + `</tr></thead>${id ? `<tbody id="${id}">` : '<tbody>'}${pairRows(a, b)}</tbody></table></div>`;
+
+// 用量行：进度条 + 「已用 / 总量（百分比）」，窄屏自动上下排（复用现有 .grid2，不新增样式）
+const useRow = (o, extra) => `<div class="grid2">${bar(o.percent || 0, (o.percent || 0) >= 90 ? 'err' : 'ok')}`
+  + `<div><span class="mono">${fmtBytes(o.used)} / ${fmtBytes(o.total)}</span>`
+  + ` <span class="chip">${o.percent || 0}%</span>`
+  + (extra ? `<div class="hint">${extra}</div>` : '') + '</div></div>';
+
+// 左半：主机 / 系统 / 时区等静态信息（[标签, 值] 二元组）
+const serverCells = (sv) => {
+  const su = sv.uptime || {};
+  return [
+    ['主机名', `<span class="mono">${esc(sv.hostname || '—')}</span>`],
+    [sv.docker ? '容器系统' : '系统', esc(sv.os || '—')
+      + (sv.kernel ? ` <span class="chip mono">${sv.docker ? '宿主内核' : '内核'} ${esc(sv.kernel)}</span>` : '')
+      + (sv.arch ? ` <span class="chip mono">${esc(sv.arch)}</span>` : '')],
+    ['运行时长', (su.host ? fmtDur(su.host) : '—')
+      + (su.process != null ? ` <span class="hint">（本服务已运行 ${fmtDur(su.process)}）</span>` : '')],
+    ['时区 / 服务器时间', esc(sv.tz || '—')
+      + (sv.now_str ? ` <span class="mono">${esc(sv.now_str)}</span>` : '')
+      + (sv.now ? ` <span class="hint">你本地 ${fmtTime(sv.now)}</span>` : '')],
+    ['运行环境', (sv.docker ? pill('ok', 'Docker 容器') : pill('', '直接跑在主机上'))
+      + (sv.ip ? ` <span class="chip mono">${esc(sv.ip)}</span>` : '')],
+    sv.python ? ['Python', `<span class="chip mono">${esc(sv.python)}</span>`] : null,
+  ].filter(Boolean);
+};
+
+// 右半：CPU / 负载 / 内存 / 磁盘 —— 这几行会实时刷新
+const resourceCells = (sv) => {
+  const sc = sv.cpu || {}, sm = sv.mem || {}, sd = sv.disk || {};
+  return [
+    ['CPU', `<b>${sc.count || '—'}</b> 核`
+      + (sc.quota ? ` <span class="chip">容器上限 ${sc.quota} 核</span>` : '')
+      + (sc.usage == null ? '' : `<div class="grid2">${bar(sc.usage, sc.usage >= 90 ? 'err' : 'ok')}`
+        + `<div><span class="mono">占用 ${sc.usage}%</span></div></div>`)
+      + (sc.model ? `<div class="hint">${esc(sc.model)}</div>` : '')],
+    (sc.load && sc.load.length) ? ['负载（1 / 5 / 15 分钟）', `<span class="mono">${sc.load.join(' / ')}</span>`] : null,
+    sm.total ? ['内存', useRow(sm, sm.limit ? `容器上限 ${fmtBytes(sm.limit)}` : '')] : null,
+    sd.total ? ['磁盘', useRow(sd, sd.path ? `数据目录 <span class="mono">${esc(sd.path)}</span>` : '')] : null,
+    sv.dbfile ? ['数据文件', `<span class="mono">${fmtBytes(sv.dbfile)}</span>`] : null,
+  ].filter(Boolean);
+};
+
+// 实时刷新：只重画这张表的 tbody，不动页面其它部分（不弹进度条、不打扰正在填的表单）
+async function serverLiveTick() {
+  if (!state.auto || (location.hash.slice(1) || 'overview') !== 'settings') return;
+  const body = $('#srvLive');
+  if (!body) return;
+  let sv = null;
+  try {
+    const r = await fetch('/api/sysinfo', {credentials: 'include'});
+    if (!r.ok) return;
+    sv = (await r.json()).server;
+  } catch (e) { return; }
+  if (!sv || !sv.hostname) return;
+  body.innerHTML = pairRows(serverCells(sv), resourceCells(sv));
+}
+
 const emptyBox = UI.empty;
 // 参考图形态：按插件声明的口径显示（合并插件按「面」分别显示）
 const refChip = (c) => {
@@ -2009,8 +2084,6 @@ const act = {
     const d = r.data, enc = d.enc || {}, counts = d.counts || {}, g = d.gate || {};
     const errN = Object.keys(d.plugin_errors || {}).length;
     const chips = (arr) => (arr || []).map(x => `<span class="chip mono">${esc(x)}</span>`).join(' ') || '<span class="hint">—</span>';
-    const row = (k, v) => `<tr><th>${k}</th><td>${v}</td></tr>`;
-    const kv = (rows) => `<table class="tb kv"><tbody>${rows.filter(Boolean).join('')}</tbody></table>`;
     const tiles = [
       stat('版本', esc(d.version), esc(d.webui || '图片协议转换网关'), 'ti-tag'),
       stat('已装载插件', (d.plugins || []).length, errN ? `<span class="chip warn">${errN} 个装载失败</span>` : '全部装载正常',
@@ -2025,79 +2098,38 @@ const act = {
         enc.broken ? 'err' : (enc.plaintext ? 'warn' : 'ok')),
     ].join('');
     // 服务器信息（只读探测，零网络）：/api/sysinfo 的 server 字段
-    const sv = d.server || {}, sc = sv.cpu || {}, sm = sv.mem || {}, sd = sv.disk || {}, su = sv.uptime || {};
-    const useTone = (p) => (p >= 90 ? 'err' : 'ok');
-    // 用量行：进度条 + 「已用 / 总量（百分比）」，窄屏自动上下排（用现有 .grid2，不新增样式）
-    const useRow = (label, o, extra) => row(label,
-      `<div class="grid2">${bar(o.percent || 0, useTone(o.percent || 0))}`
-      + `<div><span class="mono">${fmtBytes(o.used)} / ${fmtBytes(o.total)}</span>`
-      + ` <span class="chip">${o.percent || 0}%</span>`
-      + (extra ? `<div class="hint">${extra}</div>` : '') + '</div></div>');
-    const serverBlock = sv.hostname ? `
-      <div class="grid2">
-        <div>
-          <div class="set-sec-t"><i class="ti ti-cpu"></i>服务器</div>
-          ${kv([
-            row('主机名', `<span class="mono">${esc(sv.hostname)}</span>`),
-            row(sv.docker ? '容器系统' : '系统', esc(sv.os || '—')
-              + (sv.kernel ? ` <span class="chip mono">${sv.docker ? '宿主内核' : '内核'} ${esc(sv.kernel)}</span>` : '')
-              + (sv.arch ? ` <span class="chip mono">${esc(sv.arch)}</span>` : '')),
-            row('CPU', `<b>${sc.count || '—'}</b> 核`
-              + (sc.quota ? ` <span class="chip">容器上限 ${sc.quota} 核</span>` : '')
-              + (sc.model ? `<div class="hint">${esc(sc.model)}</div>` : '')),
-            (sc.load && sc.load.length) ? row('负载（1 / 5 / 15 分钟）', `<span class="mono">${sc.load.join(' / ')}</span>`) : '',
-            su.host ? row('运行时长', fmtDur(su.host) + ` <span class="hint">（本服务已运行 ${fmtDur(su.process)}）</span>`) : '',
-            row('时区 / 服务器时间', esc(sv.tz || '—')
-              + (sv.now_str ? ` <span class="mono">${esc(sv.now_str)}</span>` : '')
-              + ` <span class="hint">你本地 ${fmtTime(sv.now)}</span>`),
-            row('运行环境', (sv.docker ? pill('ok', 'Docker 容器') : pill('', '直接跑在主机上'))
-              + (sv.ip ? ` <span class="chip mono">${esc(sv.ip)}</span>` : '')),
-          ])}
-        </div>
-        <div>
-          <div class="set-sec-t"><i class="ti ti-activity"></i>资源</div>
-          ${kv([
-            sm.total ? useRow('内存', sm, sm.limit ? `容器上限 ${fmtBytes(sm.limit)}` : '') : '',
-            sd.total ? useRow('磁盘', sd, sd.path ? `数据目录 <span class="mono">${esc(sd.path)}</span>` : '') : '',
-            sv.dbfile ? row('数据文件', `<span class="mono">${fmtBytes(sv.dbfile)}</span>`) : '',
-            sv.python ? row('Python', `<span class="chip mono">${esc(sv.python)}</span>`) : '',
-          ])}
-        </div>
-      </div>` : '';
+    // 「服务器 + 资源」共用一张四列键值表（行线天然对齐 + 底部一条分隔线），右半由 serverLiveTick 实时刷新
+    const sv = d.server || {};
+    const serverBlock = sv.hostname
+      ? pairBlock('服务器', 'ti-cpu', '资源', 'ti-activity', serverCells(sv), resourceCells(sv), 'srvLive')
+      : '';
+    const envCells = [
+      ['数据库', `<span class="mono">${esc(d.db)}</span>`],
+      ['已装载插件', chips(d.plugins)],
+      ['内部主密钥', d.master_token_set
+        ? pill('ok', '已设置') + ' <span class="mono">' + esc(d.master_token_masked) + '</span>'
+        : pill('err', '未设置')],
+      d.enc ? ['密钥加密', `${pill('ok', '已开启')} <span class="chip mono">来源 ${esc(enc.source)}</span>`
+        + ` <span class="chip">已加密 ${enc.encrypted}</span>`
+        + (enc.plaintext ? ` <span class="chip warn">明文残留 ${enc.plaintext}（保存一次即自动加密）</span>` : '')
+        + (enc.broken ? ` <span class="chip warn">解不开 ${enc.broken}（QLIKEAPI_SECRET 变过？重新填一次密钥）</span>` : '')] : null,
+      errN ? ['插件错误', `<span class="hint">${Object.entries(d.plugin_errors).map(([k, v]) => esc(k) + ' → ' + esc(v)).join('；')}</span>`] : null,
+      d.webui ? ['界面', esc(d.webui)] : null,
+    ].filter(Boolean);
+    const policyCells = [
+      d.gate ? ['并发闸门', `全局上限 <b>${g.global_limit || '不限'}</b> · 排队等待 <b>${g.queue_wait}s</b> · 队列上限 <b>${g.max_waiting}</b>`
+        + `<br>当前占用 ${Object.keys(g.busy || {}).length ? Object.entries(g.busy).map(([k, v]) => `<span class="chip mono">${esc(k)} ${v}</span>`).join(' ') : '—'}`
+        + ` · 排队中 <b>${g.waiting}</b> · 累计拒绝 <b>${g.rejected}</b>`] : null,
+      d.router ? ['路由决策', `一条请求最多打 <b>${d.router.max_attempts}</b> 次上游`
+        + ` · 可重试状态码 <span class="mono">${(d.router.retryable || []).join(' ')}</span>`] : null,
+      d.breaker ? ['自动熔断', `连续失败 <b>${d.breaker.after}</b> 次 → 自动停用并放回兜底；`
+        + `<b>${Math.round(d.breaker.cooldown / 60)}</b> 分钟后自动恢复（探活通过才恢复）`] : null,
+      ['余额熔断', '站点余额低于「预警线」→ 自动停用关联渠道（在渠道实例里选「关联站点」才会跟余额联动）'],
+    ].filter(Boolean);
     $('#sysinfo').innerHTML = `
       <div class="cards">${tiles}</div>
       ${serverBlock}
-      <div class="grid2">
-        <div>
-          <div class="set-sec-t"><i class="ti ti-server-2"></i>环境</div>
-          ${kv([
-            row('数据库', `<span class="mono">${esc(d.db)}</span>`),
-            row('已装载插件', chips(d.plugins)),
-            row('内部主密钥', d.master_token_set
-              ? pill('ok', '已设置') + ' <span class="mono">' + esc(d.master_token_masked) + '</span>'
-              : pill('err', '未设置')),
-            errN ? row('插件错误', `<span class="hint">${Object.entries(d.plugin_errors).map(([k, v]) => esc(k) + ' → ' + esc(v)).join('；')}</span>`) : '',
-            d.webui ? row('界面', esc(d.webui)) : '',
-          ])}
-        </div>
-        <div>
-          <div class="set-sec-t"><i class="ti ti-adjustments-alt"></i>运行策略</div>
-          ${kv([
-            d.enc ? row('密钥加密', `${pill('ok', '已开启')} <span class="chip mono">来源 ${esc(enc.source)}</span>`
-              + ` <span class="chip">已加密 ${enc.encrypted}</span>`
-              + (enc.plaintext ? ` <span class="chip warn">明文残留 ${enc.plaintext}（保存一次即自动加密）</span>` : '')
-              + (enc.broken ? ` <span class="chip warn">解不开 ${enc.broken}（QLIKEAPI_SECRET 变过？重新填一次密钥）</span>` : '')) : '',
-            d.gate ? row('并发闸门', `全局上限 <b>${g.global_limit || '不限'}</b> · 排队等待 <b>${g.queue_wait}s</b> · 队列上限 <b>${g.max_waiting}</b>`
-              + `<br>当前占用 ${Object.keys(g.busy || {}).length ? Object.entries(g.busy).map(([k, v]) => `<span class="chip mono">${esc(k)} ${v}</span>`).join(' ') : '—'}`
-              + ` · 排队中 <b>${g.waiting}</b> · 累计拒绝 <b>${g.rejected}</b>`) : '',
-            d.router ? row('路由决策', `一条请求最多打 <b>${d.router.max_attempts}</b> 次上游`
-              + ` · 可重试状态码 <span class="mono">${(d.router.retryable || []).join(' ')}</span>`) : '',
-            d.breaker ? row('自动熔断', `连续失败 <b>${d.breaker.after}</b> 次 → 自动停用并放回兜底；`
-              + `<b>${Math.round(d.breaker.cooldown / 60)}</b> 分钟后自动恢复（探活通过才恢复）`) : '',
-            row('余额熔断', '站点余额低于「预警线」→ 自动停用关联渠道（在渠道实例里选「关联站点」才会跟余额联动）'),
-          ])}
-        </div>
-      </div>
+      ${pairBlock('环境', 'ti-server-2', '运行策略', 'ti-adjustments-alt', envCells, policyCells, '')}
       <div class="hint mt-1">渠道级并发上限在「渠道实例 → 编辑 → 并发上限」里配；全局上限用环境变量
         <code class="mono">QLIKEAPI_MAX_CONCURRENCY</code>（0=不限）。逐请求对账看响应头
         <span class="mono">X-QLike-Provider / -Failover / -Chain / -Attempt / -Degrade / -Queue-Ms</span>。</div>`;
@@ -2148,6 +2180,8 @@ const skelTable = UI.skelTable;   // 骨架屏占位（加载中）
   setInterval(() => {
     if (!state.auto) return;
     const v = location.hash.slice(1) || 'overview';
+    if (v === 'settings') return;                       // 设置页有更快的「只刷服务器/资源」定时器，别整页重画
     if (act[LOADERS[v]]) act[LOADERS[v]]();
   }, 30000);
+  setInterval(serverLiveTick, 5000);                    // 设置页：CPU / 负载 / 内存 / 磁盘 / 运行时长 实时刷新
 })();
