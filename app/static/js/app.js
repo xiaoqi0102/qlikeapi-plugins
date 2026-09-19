@@ -1662,13 +1662,18 @@ const act = {
   },
 
   imagehostNote(raw) {
-    // 参考图形态转换说明：两个方向都显示（URL → 内联 base64 / base64 → 图床直链）
+    // 参考图形态转换说明：两个方向都显示，且都写清「从什么 → 到什么」
+    //   · 渠道只认 base64（如 aicost）← 客户端给的是 URL：URL → 内联 base64
+    //   · 渠道只认公网 URL ← 客户端给的是 base64：内联 base64 → 图床直链
     try {
       const ns = JSON.parse(raw || '[]') || [];
       return ns.map(n => {
         const kb = Math.max(1, Math.round((n.bytes || 0) / 1024));
-        return n.mode === 'inline' ? `URL → 内联 base64（约 ${kb}KB）` : `约 ${kb}KB → 图床直链（${n.host || ''}）`;
-      }).join('；');
+        if (n.mode === 'inline') return `URL → 内联 base64（约 ${kb}KB）`;
+        if (n.host) return `内联 base64（约 ${kb}KB）→ 图床直链（${n.host}）`;
+        if (n.fallback) return '图床中转失败，已按原样转发（上游可能拒收）';
+        return '';
+      }).filter(Boolean).join('；');
     } catch (e) { return ''; }
   },
   refNote(raw, reqTxt, upTxt) {

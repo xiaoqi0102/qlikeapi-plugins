@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import httpx
 import pytest
@@ -45,7 +46,7 @@ def _gen(client, key, model, extra=None):
 
 
 def test_url_only_channel_converts_base64_to_public_url(client, login, make_provider,
-                                                        fake_upstream, hosts, enabled):
+                                                        fake_upstream, hosts, enabled, db):
     """七牛 fal 异步面：只认公网 URL —— base64 参考图必须被换成图床直链。"""
     calls = fake_upstream(200, {"images": [{"url": "https://kodo.example.com/out.png"}]})
     make_provider(key="q", protocol="qiniu_fal", base_url="https://api.qnaigc.com",
@@ -56,6 +57,11 @@ def test_url_only_channel_converts_base64_to_public_url(client, login, make_prov
     assert calls[0]["url"].endswith("/queue/fal-ai/gemini-3.1-flash-image-preview")
     assert hosts                                             # 确实上传了一次
     assert r.headers["X-QLike-Imagehost"] == "litterbox"     # 可观测：告诉客户端走了图床
+    # 日志详情那一行「内联 base64（约 NKB）→ 图床直链（litterbox）」靠这条记录
+    notes = json.loads(db.one("SELECT imagehost FROM logs WHERE kind='relay' "
+                              "ORDER BY id DESC LIMIT 1")["imagehost"] or "[]")
+    assert notes and notes[0]["mode"] == "imgbb" and notes[0]["host"] == "litterbox"
+    assert notes[0]["bytes"] == len(PNG)
 
 
 def test_url_only_channel_without_imagehost_fails_locally(client, login, make_provider,

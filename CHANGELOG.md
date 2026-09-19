@@ -116,6 +116,18 @@
   #291（真实客户端请求）→「参考图：base64 直传（约 1810KB，网关未转换）」。
 - 顺手清掉探针遗留：3 条测试日志行 + 临时渠道 `zz-log-inline`（渠道实例现在只剩 aicost/change2pro/qnaigc）。
 
+### 参考图说明：两个方向的文案对称化 + 图床回退不再显示错
+- 用户问「内联 base64（约 374KB）→ URL 这种情况呢？」——该方向一直支持，但文案只写「约 374KB → 图床直链（imgbb）」，
+  没说清**从什么转过来**。现在两个方向都写成「A → B」：
+  · 渠道只认 base64 ← 客户端给 URL：`URL → 内联 base64（约 NKB）`
+  · 渠道只认公网 URL ← 客户端给 base64：`内联 base64（约 NKB）→ 图床直链（host）`
+- `imagehost.py` 图床方向的 note 补 `mode: "imgbb"`（前端不再靠「没有 mode」猜方向）；`_imagehost_info()` 文案同步。
+- 修 bug：图床中转失败的回退 note（`{"fallback":true,"warnings":[…]}`）原先被渲染成「约 1KB → 图床直链（）」，
+  现在显示「图床中转失败，已按原样转发（上游可能拒收）」。
+- 测试：`test_router_gate.py` 文案断言更新；`test_relay_imagehost.py` 补「图床方向的 note 必须落到 logs.imagehost」
+  （mode=imgbb / host / bytes 三项断言）。
+- 零成本实测（浏览器里直接调真实 JS `act.imagehostNote()`，6 种输入）：内联 / 图床 / 双向 / 回退 / 老格式 / 无转换 —— 全部符合预期。
+
 ## v3.15.2 — 2026-09-18
 
 ### 修正：CI 变红（文档防漂移校验失败）

@@ -160,12 +160,12 @@ def test_router_marks_degrade_when_falling_to_next_tier(client, make_provider, m
 def test_imagehost_info_covers_both_directions():
     """参考图转换说明：两个方向都要报（base64→图床直链 / URL→内联 base64）。"""
     meta = {"imagehost": [
-        {"host": "imgbb", "bytes": 204800},
+        {"mode": "imgbb", "host": "imgbb", "bytes": 204800},
         {"mode": "inline", "from": "https://x/a.jpg", "bytes": 512000, "mime": "image/jpeg"}]}
     info = relay._imagehost_info(meta)
     assert info["imagehost"] == "imgbb,inline" and info["imagehost_n"] == 2
-    assert "200KB → 图床直链（imgbb）" in info["imagehost_note"]
-    assert "URL → 内联 base64（500KB）" in info["imagehost_note"]
+    assert "内联 base64（约 200KB）→ 图床直链（imgbb）" in info["imagehost_note"]
+    assert "URL → 内联 base64（约 500KB）" in info["imagehost_note"]
     assert relay._imagehost_info({}) == {}                       # 没转换就不出现
 
 

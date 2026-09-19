@@ -415,7 +415,7 @@ def ensure_refs(refs: list[str], policy: str, cfg: dict | None = None,
             key = hashlib.sha256(raw).hexdigest()
             if key not in cache:
                 url, host, soft = cache[key] = upload_with_fallback(raw, mime, cfg)
-                notes.append({"host": host, "mime": mime, "bytes": len(raw),
+                notes.append({"mode": "imgbb", "host": host, "mime": mime, "bytes": len(raw),
                               "url": url, "warnings": soft})
             url, host = cache[key][0], cache[key][1]
             out.append(url)

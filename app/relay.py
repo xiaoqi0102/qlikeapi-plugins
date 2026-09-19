@@ -390,8 +390,8 @@ def _imagehost_info(meta: dict) -> dict:
     if not ups and not ins:
         return {}
     hosts = list(dict.fromkeys(n["host"] for n in ups))
-    parts = [f"参考图 {n['bytes'] // 1024}KB → 图床直链（{n['host']}）" for n in ups]
-    parts += [f"参考图 URL → 内联 base64（{n['bytes'] // 1024}KB）" for n in ins]
+    parts = [f"参考图 内联 base64（约 {n['bytes'] // 1024}KB）→ 图床直链（{n['host']}）" for n in ups]
+    parts += [f"参考图 URL → 内联 base64（约 {n['bytes'] // 1024}KB）" for n in ins]
     return {"imagehost": ",".join(hosts + (["inline"] if ins else [])),
             "imagehost_n": len(ups) + len(ins),
             "imagehost_note": "；".join(parts),
