@@ -41,7 +41,7 @@ JS = """() => {
   return [...document.querySelectorAll('body *')].map(el => {
     const cs = getComputedStyle(el);
     const o = {tag: el.tagName, cls: (el.className || '').toString().slice(0, 70)};
-    o.inKit = !!el.closest('.pk, .pk-pop, .cf, .set-sec, .kv2');   // 新增组件（多选选择器/确认框/设置页四列区块）内部元素，不参与回归比对
+    o.inKit = !!el.closest('.pk, .pk-pop, .cf, .set-sec, .kv2, .price-cell, .ih-sw');   // 新增组件（多选选择器/确认框/设置页四列区块）内部元素，不参与回归比对
     for (const p of props) o[p] = cs[p];
     return o;
   });

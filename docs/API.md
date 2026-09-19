@@ -213,8 +213,8 @@ gemini 与 gpt 常常不同组）—— 同一个渠道里放多组密钥，路�
 |---|---|---|
 | GET | `/api/models` | 模型 × 渠道矩阵（含单价） |
 | GET | `/api/meta/options` | 下拉选项：`models[]`（统一模型名 + 可用渠道数 + 上游真名）、`providers[]`（渠道 key/标签/启停）；供令牌弹窗的多选选择器使用 |
-| GET / POST | `/api/prices` | 单价表（`model`,`provider`,`price`,`currency`,`source`） |
-| POST | `/api/prices/sync` | 从 New API 同步价格口径 |
+| GET / POST | `/api/prices` | 单价表（`model`,`provider`,`price`,`currency`,`source`,`note`）。模型目录里点铅笔改价 = 写 `source=manual` 的手工价 |
+| POST | `/api/prices/sync` | 从 New API 同步价格口径。**手工价（`source=manual`）不会被覆盖**，结果里用 `skipped` 报出跳过了哪几格 |
 | POST | `/api/prices/prune` | 清理**孤儿价**（`provider` 已不存在的遗留行），返回 `{removed, items}`；删渠道时已自动级联清理，这里是兜底 |
 | DELETE | `/api/prices/{id}` | 删一条价格 |
 | GET | `/api/size-plan?model=&size=&policy=&mode=` | **尺寸换算**（纯计算、零成本、不出图）：返回 `{size, final, changed, family, mode, ratio, tier, policy, note, rules?, allowed?, official?, nearest_official?, tiers?, tokens?, tokens_all?, source?}`。GPT 系按最小改动吸附（`official` = 官方常用尺寸，`nearest_official` = 离请求最近的那个）；Gemini 系返回档位/比例、**实际输出像素**（`tiers` = 该比例下整张官方档位表）与官方 token 消耗。`policy` = `class`（默认）/`floor`/`nearest`/`ceil`；`mode` = `snap`（默认）/`passthrough`（原样透传不改尺寸） |

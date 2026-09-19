@@ -71,6 +71,46 @@ def test_unsupported_site_type_is_reported_not_silently_empty(db, make_provider,
     assert res["ok"] is False and "不支持价格直读" in res["error"]
 
 
+def test_price_sync_keeps_manual_price_and_reports_skipped(db, make_provider, monkeypatch):
+    """用户手工填过的价：同步要跳过它，并在结果里报「跳过了几条」。"""
+    make_provider(key="aicost", protocol="aicost", base_url="https://www.aicost.me",
+                  model_map={"gpt-image-2": "gpt-image-2", "gemini-3-pro-image": "gemini-3-pro-image-preview"})
+    _bind("aicost", _site())
+    # 手工价：gpt-image-2 用户自己填的（0.02），另一个模型没填
+    store.set_price_full("gpt-image-2", "aicost", 0.02, "USD", source="manual", note="我按 Ozon 主图结算")
+    monkeypatch.setattr(balances, "fetch_newapi_pricing", lambda s, api_key='', groups=None: {
+        "prices": {"gpt-image-2": {"price": 0.445},
+                   "gemini-3-pro-image-preview": {"price": 0.12}},
+        "currency": "USD", "total": 2})
+
+    res = balances.sync_provider_prices("aicost")
+
+    assert res["ok"] is True
+    assert res["skipped"] == ["gpt-image-2@aicost"]          # 手工价被跳过并报出来
+    rows = {r["model"]: r for r in store.list_prices() if r["provider"] == "aicost"}
+    assert rows["gpt-image-2"]["price"] == 0.02               # 手工价原封不动
+    assert rows["gpt-image-2"]["source"] == "manual"
+    assert rows["gemini-3-pro-image"]["price"] == 0.12        # 没手工价的照常同步
+    assert rows["gemini-3-pro-image"]["source"] == "platform"
+
+
+def test_sub2api_sync_keeps_manual_price(db, make_provider, monkeypatch):
+    """用量反推那条路也要保手工价。"""
+    make_provider(key="change2pro", protocol="change2pro", base_url="https://api.change2pro.com",
+                  model_map={"gemini-3-pro-image": "gemini-3-pro-image-preview"})
+    _bind("change2pro", _site(name="change2pro", stype="sub2api", base="https://api.change2pro.com"))
+    store.set_price_full("gemini-3-pro-image", "change2pro", 0.077, "USD", source="manual")
+    monkeypatch.setattr(balances, "fetch_sub2api", lambda s, api_key='', groups=None: {
+        "balance": 2.66, "raw": {"model_usage": [
+            {"model": "gemini-3-pro-image-preview", "requests": 7, "cost": 0.42}]}})
+
+    res = balances.sync_provider_prices("change2pro")
+
+    assert res["skipped"] == ["gemini-3-pro-image@change2pro"]
+    row = [r for r in store.list_prices() if r["provider"] == "change2pro"][0]
+    assert row["price"] == 0.077 and row["source"] == "manual"
+
+
 def test_sub2api_sync_still_works_and_maps_to_client_names(db, make_provider, monkeypatch):
     make_provider(key="change2pro", protocol="change2pro", base_url="https://api.change2pro.com",
                   model_map={"gemini-3-pro-image": "gemini-3-pro-image-preview"})

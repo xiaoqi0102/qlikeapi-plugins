@@ -728,6 +728,11 @@ def api_models(request: Request):
                         "enabled": bool(p["enabled"]), "priority": p.get("priority") or 0,
                         "price": pr.get("price"), "currency": pr.get("currency"),
                         "source": pr.get("source"), "price_note": pr.get("note"),
+                        "price_id": pr.get("id"),
+                        # 这一格的价格是从哪一层取到的：渠道专属 / 模型全局 / 兜底（*、*）
+                        "price_scope": (None if not pr else
+                                        ("provider" if pr.get("provider") == p["key"] else
+                                         ("model" if pr.get("model") == m["id"] else "global"))),
                         "operations": [o["operation"] for o in (ch.info()["operations"] if ch else [])]})
     return out
 

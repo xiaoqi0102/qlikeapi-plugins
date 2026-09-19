@@ -364,3 +364,33 @@ def test_no_channel_supports_model_404(client, make_provider, no_upstream):
     make_provider(key="a", model_map={"gpt-image-2": "gpt-image-2"})
     r = client.post("/v1/images/generations", json={"model": "没这个模型", "prompt": "x"}, headers=MASTER)
     assert r.status_code == 404 and no_upstream == []
+
+
+# ------------------------------------------------------------------ 手动改价（模型目录）
+
+def test_manual_price_roundtrip_and_models_exposes_price_id(client, login, make_provider):
+    """手动改价：POST /api/prices 写 source=manual；模型目录要带上 price_id（「清除手工价」用）。"""
+    make_provider(key="p1", model_map={"gpt-image-2": "gpt-image-2"})
+
+    r = client.post("/api/prices", json={"model": "gpt-image-2", "provider": "p1", "price": 0.02,
+                                         "currency": "USD", "source": "manual", "note": "Ozon 主图"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    row = store.price_exact("gpt-image-2", "p1")
+    assert row["price"] == 0.02 and row["source"] == "manual" and row["currency"] == "USD"
+
+    m = [x for x in client.get("/api/models").json()
+         if x["provider"] == "p1" and x["model"] == "gpt-image-2"][0]
+    assert m["source"] == "manual" and m["price"] == 0.02
+    assert m["price_id"] == row["id"] and m["currency"] == "USD"
+
+    # 「清除手工价」= 删掉这一行 → 回到未定价（不回落成别的价）
+    assert client.delete(f"/api/prices/{row['id']}").status_code == 200
+    assert store.price_exact("gpt-image-2", "p1") is None
+    m = [x for x in client.get("/api/models").json()
+         if x["provider"] == "p1" and x["model"] == "gpt-image-2"][0]
+    assert m["price"] is None and m["price_id"] is None
+
+
+def test_price_set_rejects_missing_model(client, login):
+    r = client.post("/api/prices", json={"provider": "p1", "price": 0.02})
+    assert r.status_code == 400 and "model" in r.json()["error"]

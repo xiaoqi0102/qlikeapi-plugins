@@ -850,6 +850,10 @@ body.dark .kit-code{background:var(--bg);border-color:var(--line)}
 .tb-dir { table-layout: fixed; }
 .tb-dir th, .tb-dir td { vertical-align: middle; }
 .tb-dir th.num-col, .tb-dir td.num-col { text-align: right; font-variant-numeric: tabular-nums; }
+/* 模型目录：单价单元格 = 「价 + 改价按钮」同一行右对齐、永不换行（按钮不被挤到下一行） */
+.tb-dir td.num-col .price-cell { display: flex; align-items: center; justify-content: flex-end;
+  gap: var(--sp-1); white-space: nowrap; }
+.tb-dir td.num-col .price-cell .btn { padding: 0 5px; line-height: 1.5; }
 .tb-dir th.ctr, .tb-dir td.ctr { text-align: center; }
 .tb-dir td .mono { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .tb-dir td.src-col { white-space: nowrap; }
@@ -925,6 +929,9 @@ table.tb.ih-tb td.ih-ep{font-family:var(--mono);font-size:var(--fs-xs);color:var
 table.tb.ih-tb .ih-note{display:block;color:var(--muted);font-size:var(--fs-xs);margin-top:2px}
 table.tb.ih-tb td.ih-act{white-space:nowrap;text-align:right}
 table.tb.ih-tb td.ih-act .btn{margin-left:var(--sp-1)}
+/* 图床每行一个独立开关（点一下立刻保存，不用再点「保存」）：单元格里垂直居中、不撑高 */
+table.tb.ih-tb td .ih-sw{margin:0;min-height:0;display:flex;align-items:center}
+table.tb.ih-tb td .ih-sw .form-check-input{margin:0;cursor:pointer}
 
 /* ==================== 渠道插件页「操作」列：按钮一律横向排列
    用户反馈：插件行的操作按钮竖着排 —— 该列被前面几列的 chips 挤到 ~53px，

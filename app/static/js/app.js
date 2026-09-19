@@ -419,6 +419,54 @@ const act = {
     toast('已删除'); act.loadUsage();
   },
 
+  /* ---- 模型目录：手动改价（写「客户端模型名 + 渠道」这一格，source=manual）---- */
+  priceEdit(provider, model) {
+    const m = (state._modelRows || []).find(x => x.provider === provider && x.model === model) || {};
+    const cur = m.currency || 'USD';
+    const srcLabel = act.priceSrcLabel(m);
+    const now = m.price == null ? '<span class="hint">未定价</span>'
+      : `<b class="num">${m.currency === 'USD' ? '$' : '¥'}${Number(m.price).toFixed(4)}</b>`;
+    modal(`手动改价 · ${model}`, `
+      <div class="row g-3">
+        <div class="col-md-4"><label class="form-label">单价（每张）</label>
+          <input class="form-control" id="mpPrice" type="number" step="0.0001" min="0"
+                 value="${m.price == null ? '' : m.price}" placeholder="比如 0.06"></div>
+        <div class="col-md-3"><label class="form-label">币种</label>
+          <select class="form-select" id="mpCur">${['USD', 'CNY'].map(c =>
+            `<option ${cur === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+          <div class="hint mt-1">只记币种，不做汇率换算</div></div>
+        <div class="col-md-5"><label class="form-label">备注</label>
+          <input class="form-control" id="mpNote" value="${esc(m.price_note || '')}"
+                 placeholder="比如：Ozon 主图按 0.02 结算"></div>
+      </div>
+      <div class="hint mt-2">渠道 <span class="mono">${esc(provider)}</span> · 模型 <span class="mono">${esc(model)}</span>
+        · 当前：${now}（来源 ${esc(srcLabel)}）</div>
+      <div class="hint mt-1"><i class="ti ti-info-circle"></i> 手工价<b>不会被「同步价格」覆盖</b>：
+        同步会跳过它，并在结果里告诉你有几条被跳过。想回到上游价就点「清除手工价」。</div>`,
+      `<button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+       ${m.source === 'manual' && m.price_id ? `<button class="btn btn-outline-danger" onclick="act.priceClear(${m.price_id})"><i class="ti ti-eraser"></i> 清除手工价</button>` : ''}
+       <button class="btn btn-primary" onclick="act.priceSave('${esc(provider)}','${esc(model)}')"><i class="ti ti-device-floppy"></i> 保存</button>`);
+  },
+
+  async priceSave(provider, model) {
+    const v = parseFloat($('#mpPrice').value);
+    if (!(v >= 0)) return toast('单价请填一个不小于 0 的数字（想取消定价就点「清除手工价」）', true);
+    const r = await api('/api/prices', {method: 'POST', body: {model, provider, price: v,
+      currency: $('#mpCur').value, source: 'manual', note: $('#mpNote').value.trim()}});
+    if (!r || !r.ok) return toast('保存失败', true);
+    UI.closeModal();
+    toast(`已保存手工单价 · ${model}`);
+    act.loadModels();
+  },
+
+  async priceClear(pid) {
+    UI.closeModal();
+    if (!(await UI.confirm('清除这条手工价？清除后会回落到上游同步来的价（或「未定价」）。', {okText: '清除'}))) return;
+    await api('/api/prices/' + pid, {method: 'DELETE'});
+    toast('已清除手工价');
+    act.loadModels();
+  },
+
   /* -------------------- 渠道实例 -------------------- */
   async loadProviders() {
     const box = $('#providers');
@@ -1379,6 +1427,17 @@ const act = {
   /* -------------------- 模型目录 -------------------- */
   // 三张表共用同一组列宽（table-layout:fixed + colgroup）—— 否则每张表各算各的列宽，
   // 「真实单价 / 价格来源」两列会上下错位（用户反馈的正是这个）。
+  // 单价来源 → [pill 样式, 中文名]（表格与「手动改价」弹窗共用）
+  SRC: {upstream: ['ok', '上游实测'], platform: ['info', '平台直读'], newapi: ['info', 'New API'], manual: ['', '手工']},
+
+  /* 单价来源文案：渠道专属价 → 来源名；只有全局价 → 「全局价」；真没价 → 「未定价」。
+     起因：price_row 会回落到全局价，于是出现「显示 ¥0.0300 却标着未定价」的自相矛盾。 */
+  priceSrcLabel(m) {
+    if (m.source) return (act.SRC[m.source] || ['', m.source])[1];
+    if (m.price == null) return '未定价';
+    return m.price_scope === 'global' ? '兜底价' : '全局价';
+  },
+
   DIRCOLS: {widths: ['19%', '24%', '11%', '28%', '9%', '9%'],
             hcls: ['', '', 'num-col', 'src-col', 'ctr', 'ctr'],
             ccls: ['', '', 'num-col', 'src-col', 'ctr', 'ctr'], cls: 'tb-dir'},
@@ -1388,7 +1447,7 @@ const act = {
     if (!r) return;
     const grp = {};
     r.data.forEach(m => { (grp[m.provider] = grp[m.provider] || {label: m.provider_label, plugin: m.plugin_label, enabled: m.enabled, items: []}).items.push(m); });
-    const SRC = {upstream:['ok','上游实测'], platform:['info','平台直读'], newapi:['info','New API'], manual:['','手工']};
+    state._modelRows = r.data;                       // 「手动改价」弹窗要按 (渠道, 模型) 回查当前价
     $('#models').innerHTML = Object.keys(grp).length ? Object.entries(grp).map(([k, v]) => `
       <div class="panel" style="box-shadow:none;margin-bottom:14px">
         <header><h3><i class="ti ti-server-2"></i>${esc(v.label)} <span class="hint mono">/up/${esc(k)} · ${esc(v.plugin)}</span></h3>
@@ -1399,9 +1458,11 @@ const act = {
               <i class="ti ti-cloud-download"></i> 同步价格</button></div></header>
         <div class="body tight">${table(['客户端模型名','上游真实名','真实单价','价格来源','是否映射','支持操作'],
           v.items.map(m => {
-            const src = SRC[m.source] || ['', m.source || '未定价'];
-            const money = m.price == null ? '<span class="hint">未定价</span>'
-              : `<b class="num">${m.currency === 'USD' ? '$' : '¥'}${Number(m.price).toFixed(4)}</b><span class="hint"> /张</span>`;
+            const src = [act.SRC[m.source] ? act.SRC[m.source][0] : '', act.priceSrcLabel(m)];
+            const money = `<span class="price-cell">${m.price == null ? '<span class="hint">未定价</span>'
+              : `<b class="num">${m.currency === 'USD' ? '$' : '¥'}${Number(m.price).toFixed(4)}</b><span class="hint"> /张</span>`}<button
+                class="btn btn-sm btn-outline-secondary" title="手动改这一格的单价（手工价不会被「同步价格」覆盖）"
+                aria-label="手动改价" onclick="act.priceEdit('${esc(k)}','${esc(m.model)}')"><i class="ti ti-pencil"></i></button></span>`;
             return [`<span class="mono" title="${esc(m.model)}">${esc(m.model)}</span>`,
               `<span class="mono" title="${esc(m.upstream)}">${esc(m.upstream)}</span>`,
               money, pill(src[0], src[1]) + (m.price_note ? `<span class="src-note" title="${esc(m.price_note)}">${esc(m.price_note)}</span>` : ''),
@@ -1852,8 +1913,9 @@ const act = {
     if (!r) return;
     const d = r.data || {};
     if (d.error) { toast(`${key}：${d.error}`, true); return; }
-    const n = (d.prices || []).length;
-    toast(`${key}：直读 ${n} 条单价（${d.source === 'pricing' ? '平台报价' : '用量反推'}）`, n === 0);
+    const n = (d.prices || []).length, sk = (d.skipped || []).length;
+    toast(`${key}：直读 ${n} 条单价（${d.source === 'pricing' ? '平台报价' : '用量反推'}）`
+      + (sk ? `；${sk} 条手工价已跳过` : ''), n === 0 && !sk);
     act.loadModels();
   },
 
@@ -1865,7 +1927,9 @@ const act = {
     const synced = r.data.synced || [];
     const n = synced.reduce((a, x) => a + (x.prices || []).length, 0);
     const errs = synced.filter(x => x.error);
-    toast(`已同步 ${n} 条单价` + (errs.length ? `；${errs.length} 个站点失败：${errs[0].site}（${errs[0].error}）` : ''), n === 0);
+    const sk = synced.reduce((a, x) => a + (x.skipped || []).length, 0);
+    toast(`已同步 ${n} 条单价` + (sk ? `；${sk} 条手工价已跳过` : '')
+      + (errs.length ? `；${errs.length} 个站点失败：${errs[0].site}（${errs[0].error}）` : ''), n === 0 && !sk);
     act.loadModels();
   },
 
@@ -1980,30 +2044,25 @@ const act = {
   /* -------------------- 设置 -------------------- */
   /* ---------------- 图床（参考图 base64 → 公网直链） ---------------- */
 
-  async loadImagehost() {
-    const box = $('#ihBox'); if (!box) return;
-    const r = await api('/api/settings/imagehost');
-    if (!r || !r.ok || !r.data) { box.innerHTML = '<div class="hint">读取失败</div>'; return; }
-    const d = r.data, cfg = d.cfg || {}, chain = (cfg.chain || []).slice();
-    state.ih = d;
+  /* 图床候选表：单独抽出来 —— 开关 / 上下移只重画这张表，不动上面正在填的参数
+     （否则会把还没保存的 ImgBB Key 冲掉）。每行一个独立开关，点一下即存。 */
+  ihTable(d) {
+    const cfg = (d || {}).cfg || {}, chain = (cfg.chain || []).slice();
     const ids = (d.hosts || []).map(h => h.id);
     const order = chain.concat(ids.filter(id => !chain.includes(id)));
     const byId = {}; (d.hosts || []).forEach(h => byId[h.id] = h);
-    $('#ihState').innerHTML = cfg.enabled ? pill('ok', '已启用') : '<span class="pill">未启用</span>';
-    box.innerHTML = `
-      <div class="form-check form-switch mb-2">
-        <input class="form-check-input" type="checkbox" id="ihEnabled" ${cfg.enabled ? 'checked' : ''}>
-        <label class="form-check-label" for="ihEnabled">启用图床转换（只对「只认公网 URL」「两者都支持」的渠道生效；只认 base64 的渠道永不走图床）</label>
-      </div>
-      <div class="hint">候选顺序：从上到下依次尝试，第一个成功即用。未勾选的不会被使用。</div>
-      <div class="table-wrap mt-2"><table class="tb ih-tb">
-        <thead><tr><th>启用</th><th>服务</th><th>有效期</th><th>上传地址</th><th class="ih-act">操作</th></tr></thead>
-        <tbody>${order.map(id => {
+    return `<div class="table-wrap mt-2"><table class="tb ih-tb">
+      <thead><tr><th>启用</th><th>服务</th><th>有效期</th><th>上传地址</th><th class="ih-act">操作</th></tr></thead>
+      <tbody>${order.map(id => {
         const h = byId[id] || {id, label: id, ttl: '', note: '', endpoint: ''};
         const on = chain.includes(id);
         return `<tr>
-          <td><input type="checkbox" class="form-check-input" data-ih="${esc(id)}" ${on ? 'checked' : ''}></td>
-          <td><b>${esc(h.label)}</b>${on ? '' : ' <span class="chip">已停用</span>'}${h.needs_key && !d.imgbb_key_set ? ' <span class="chip warn">未配 Key → 自动跳过</span>' : ''}
+          <td><div class="form-check form-switch ih-sw">
+            <input class="form-check-input" type="checkbox" role="switch" data-ih="${esc(id)}"
+                   title="${on ? '点击停用' : '点击启用'} ${esc(h.label)}"
+                   aria-label="${on ? '停用' : '启用'} ${esc(h.label)}" ${on ? 'checked' : ''}
+                   onchange="act.ihToggle('${esc(id)}', this.checked)"></div></td>
+          <td><b>${esc(h.label)}</b> ${on ? pill('ok dot', '已启用') : '<span class="chip">已停用</span>'}${h.needs_key && !d.imgbb_key_set ? ' <span class="chip warn">未配 Key → 自动跳过</span>' : ''}
             <span class="ih-note">${esc(h.note)}</span></td>
           <td><span class="chip">${esc(h.ttl)}</span></td>
           <td class="ih-ep">${esc(h.endpoint)}</td>
@@ -2012,7 +2071,44 @@ const act = {
             <button class="btn btn-sm btn-outline-secondary" title="下移" aria-label="下移" onclick="act.ihMove('${esc(id)}',1)"><i class="ti ti-arrow-down"></i></button>
             <button class="btn btn-sm btn-outline-secondary" title="上传 1×1 自检图" onclick="act.ihTest('${esc(id)}')">自检</button>
           </td></tr>`; }).join('')}</tbody>
-      </table></div>
+    </table></div>`;
+  },
+
+  /* 只重画候选表（保留上面的参数输入框内容） */
+  ihRefreshTable() {
+    const wrap = $('#ihTableWrap');
+    if (wrap && state.ih) wrap.innerHTML = act.ihTable(state.ih);
+  },
+
+  /* 每一行的独立启用 / 停用：点一下立刻保存，不用再点「保存」 */
+  async ihToggle(id, on) {
+    const d = state.ih; if (!d) return;
+    const chain = (d.cfg.chain || []).slice();
+    const ids = (d.hosts || []).map(h => h.id);
+    const order = chain.concat(ids.filter(x => !chain.includes(x)));
+    const next = order.filter(x => (x === id ? on : chain.includes(x)));
+    const r = await api('/api/settings/imagehost', {method: 'POST', body: {chain: next}});
+    if (!r || !r.ok || !r.data) { toast('切换失败，请重试', true); act.loadImagehost(); return; }
+    state.ih = r.data;
+    act.ihRefreshTable();
+    const h = (d.hosts || []).find(x => x.id === id) || {};
+    toast(`${on ? '已启用' : '已停用'} ${h.label || id}`);
+  },
+
+  async loadImagehost() {
+    const box = $('#ihBox'); if (!box) return;
+    const r = await api('/api/settings/imagehost');
+    if (!r || !r.ok || !r.data) { box.innerHTML = '<div class="hint">读取失败</div>'; return; }
+    const d = r.data, cfg = d.cfg || {};
+    state.ih = d;
+    $('#ihState').innerHTML = cfg.enabled ? pill('ok', '已启用') : '<span class="pill">未启用</span>';
+    box.innerHTML = `
+      <div class="form-check form-switch mb-2">
+        <input class="form-check-input" type="checkbox" id="ihEnabled" ${cfg.enabled ? 'checked' : ''}>
+        <label class="form-check-label" for="ihEnabled">启用图床转换（只对「只认公网 URL」「两者都支持」的渠道生效；只认 base64 的渠道永不走图床）</label>
+      </div>
+      <div class="hint">候选顺序：从上到下依次尝试，第一个成功即用。<b>每行的开关点一下立刻生效</b>（不用再点保存）；没启用的不会被使用。</div>
+      <div id="ihTableWrap">${act.ihTable(d)}</div>
       <div class="set-sec-t mt-4"><i class="ti ti-adjustments"></i>参数</div>
       <div class="row g-2">
         <div class="col-md-6"><label class="form-label">ImgBB API Key
@@ -2058,7 +2154,8 @@ const act = {
     [order[i], order[k]] = [order[k], order[i]];
     const on = $$('#ihBox input[data-ih]').filter(x => x.checked).map(x => x.dataset.ih);
     const r = await api('/api/settings/imagehost', {method: 'POST', body: {chain: order.filter(x => on.includes(x))}});
-    if (r && r.ok) act.loadImagehost(); else toast('调整顺序失败', true);
+    if (r && r.ok && r.data) { state.ih = r.data; act.ihRefreshTable(); }
+    else toast('调整顺序失败', true);
   },
 
   async ihTest(host) {

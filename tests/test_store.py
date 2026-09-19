@@ -121,6 +121,18 @@ def test_price_lookup_priority(db):
     assert store.price_row("gpt-image-2", "c2p")["currency"] == "USD"
 
 
+def test_price_exact_does_not_fall_back(db):
+    """price_exact 只认「模型 + 渠道」精确命中 —— 手工价保命靠它，回落会把全局价误判成手工价。"""
+    store.set_price_full("*", "*", 0.5, "CNY", source="manual", note="兜底")
+    store.set_price_full("gpt-image-2", "*", 0.03, "CNY", source="manual")
+    store.set_price_full("gpt-image-2", "c2p", 0.06, "USD", source="upstream")
+    assert store.price_exact("gpt-image-2", "c2p")["source"] == "upstream"
+    assert store.price_exact("gpt-image-2", "c2p")["currency"] == "USD"
+    # 渠道没有专属行 → None（不拿全局价 / 兜底价顶）
+    assert store.price_exact("gpt-image-2", "other") is None
+    assert store.price_exact("完全没定价的模型", "other") is None
+
+
 def test_estimate_cost(db):
     store.set_price_full("gpt-image-2", "c2p", 0.06, "USD", source="upstream")
     assert store.estimate_cost("c2p", "gpt-image-2", 3) == (0.18, "USD")

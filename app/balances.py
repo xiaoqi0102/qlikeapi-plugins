@@ -542,6 +542,12 @@ def _providers_of_site(site: dict) -> list[dict]:
     return out
 
 
+def _keep_manual(model: str, provider: str) -> bool:
+    """这一格是不是用户手工填的价？是的话同步别覆盖它（手工价 > 上游价）。"""
+    row = store.price_exact(model, provider)
+    return bool(row and (row.get("source") or "") == "manual")
+
+
 def _sync_site_prices(site: dict, only_provider: str | None = None) -> dict:
     """同步一个站点的真实单价，写到它下面各渠道实例上（按「客户端模型名」落库）。
 
@@ -559,6 +565,7 @@ def _sync_site_prices(site: dict, only_provider: str | None = None) -> dict:
         return {"site": name, "error": "该站点下还没有渠道实例，先建渠道再同步价格"}
 
     written: list[str] = []
+    skipped: list[str] = []          # 用户手工填过的价，同步不覆盖
     if stype == "sub2api":
         try:
             res = fetch_sub2api(site)
@@ -577,10 +584,14 @@ def _sync_site_prices(site: dict, only_provider: str | None = None) -> dict:
             unit = round(cost / req, 6)
             for p in provs:
                 cli = _client_name(p, up)
+                if _keep_manual(cli, p["key"]):
+                    skipped.append(f"{cli}@{p['key']}")
+                    continue
                 store.set_price_full(cli, p["key"], unit, currency="USD", source="upstream",
                                      note=f"{name} /v1/usage：{req} 次 ${cost:.2f}")
                 written.append(f"{cli}@{p['key']}=${unit}")
-        return {"site": name, "source": "usage", "balance": res.get("balance"), "prices": written}
+        return {"site": name, "source": "usage", "balance": res.get("balance"),
+                "prices": written, "skipped": skipped}
 
     if stype == "newapi":
         # 一个站点上的不同渠道可能用不同的 key（不同 key 绑不同分组 → 倍率不同），
@@ -603,6 +614,9 @@ def _sync_site_prices(site: dict, only_provider: str | None = None) -> dict:
                 cli = inv.get(up)
                 if not cli:
                     continue              # 该渠道不对外暴露这个模型，不写价
+                if _keep_manual(cli, p["key"]):
+                    skipped.append(f"{cli}@{p['key']}")
+                    continue
                 price, note = info["price"], _price_note(name, up, info)
                 if ov is not None:
                     price = round(float(info.get("raw") or info["price"]) * ov, 6)
@@ -613,7 +627,7 @@ def _sync_site_prices(site: dict, only_provider: str | None = None) -> dict:
                 written.append(f"{cli}@{p['key']}=${price}")
                 n += 1
             res_all[p["key"]] = {"group": res.get("groups"), "models": n}
-        return {"site": name, "source": "pricing", "prices": written,
+        return {"site": name, "source": "pricing", "prices": written, "skipped": skipped,
                 "group": (res_all.get(provs[0]["key"]) or {}).get("group") if provs else None,
                 "per_provider": {k: v for k, v in res_all.items() if k != "payload"}}
 

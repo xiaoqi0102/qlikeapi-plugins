@@ -384,6 +384,16 @@ def price_for(model: str, provider: str) -> float:
     return float(r["price"] or 0) if r else 0.0
 
 
+def price_exact(model: str, provider: str) -> dict | None:
+    """只取「模型 + 渠道」精确命中的那一行（**不回落**全局价 / 兜底价）。
+
+    用途：手工价（`source=manual`）要保命 —— 同步上游价时靠它判断「这一格是不是
+    用户自己手填的」，是就跳过，别把人的手填价冲掉。
+    """
+    r = rows("SELECT * FROM model_prices WHERE model=? AND provider=?", (model or "", provider or "*"))
+    return r[0] if r else None
+
+
 def estimate_cost(provider: str, model: str, images: int | None) -> tuple[float, str]:
     """返回 (估算金额, 币种)。没有定价则 0。"""
     row = price_row(model or "", provider)
