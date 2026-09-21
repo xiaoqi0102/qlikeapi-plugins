@@ -303,7 +303,7 @@ make test && make lint
 
 ## 许可
 
-[MIT](LICENSE) © 2026 李永琪（xiaoqi0102）
+[MIT](LICENSE) © 2026 xiaoqi0102
 
 第三方前端库（Bootstrap / Tabler Icons / Chart.js 等）均为本地自托管的 MIT 组件，
 清单见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
