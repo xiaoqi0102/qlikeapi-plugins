@@ -122,6 +122,8 @@ MIGRATIONS = [
     ("logs", "cost_currency", "TEXT"),
     ("model_prices", "currency", "TEXT DEFAULT 'CNY'"),
     ("model_prices", "source", "TEXT"),
+    # v3.17：阶梯价（如 gpt-image-2-all 的 quality×resolution 9 档）—— JSON，NULL = 只有扁平单价
+    ("model_prices", "variants", "TEXT"),
     ("logs", "kind", "TEXT DEFAULT 'relay'"),
     ("logs", "attempts", "INTEGER"),
     # v3.15.1：异步任务页展示所有渠道（fal 队列 / 上游任务号轮询）
@@ -394,25 +396,77 @@ def price_exact(model: str, provider: str) -> dict | None:
     return r[0] if r else None
 
 
-def estimate_cost(provider: str, model: str, images: int | None) -> tuple[float, str]:
-    """返回 (估算金额, 币种)。没有定价则 0。"""
+def variant_price(row: dict | None, params: dict | None) -> float | None:
+    """在 variants JSON 里按请求参数**精确命中一格**；命中不了返回 None（回落行内扁平单价）。
+
+    variants 形状（与上游站点 /api/pricing 的 variants 同构）::
+
+        {"dimensions": ["quality", "resolution"],
+         "prices": [{"params": {"quality": "low", "resolution": "1k"}, "price": 0.03}, ...]}
+
+    dimensions 里的每个维度都必须命中（值大小写不敏感），才算命中一格。
+    """
+    if not row:
+        return None
+    raw = row.get("variants") if isinstance(row, dict) else None
+    if not raw:
+        return None
+    try:
+        spec = json.loads(raw)
+    except Exception:                                  # noqa: BLE001 —— 坏 JSON 当作没有阶梯
+        return None
+    if not isinstance(spec, dict):
+        return None
+    dims = [str(d).strip().lower() for d in (spec.get("dimensions") or [])]
+    entries = spec.get("prices")
+    if not dims or not isinstance(entries, list):
+        return None
+    want = {str(k).strip().lower(): str(v).strip().lower() for k, v in (params or {}).items()}
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        got = {str(k).strip().lower(): str(v).strip().lower() for k, v in (e.get("params") or {}).items()}
+        if all(want.get(d) == got.get(d) for d in dims):
+            try:
+                return float(e.get("price") or 0)
+            except Exception:                          # noqa: BLE001
+                return None
+    return None
+
+
+def estimate_cost(provider: str, model: str, images: int | None,
+                  params: dict | None = None) -> tuple[float, str]:
+    """返回 (估算金额, 币种)。没有定价则 0。
+
+    params（quality / resolution / size…）用于命中「阶梯价」：命中一格就按那格算，
+    命不中就回落该行的扁平单价（向后兼容老数据）。
+    """
     row = price_row(model or "", provider)
     n = max(1, int(images or 1))
     if not row:
         return 0.0, "CNY"
-    return round(float(row["price"] or 0) * n, 6), (row.get("currency") or "CNY")
+    hit = variant_price(row, params)
+    price = float(row["price"] or 0) if hit is None else hit
+    return round(price * n, 6), (row.get("currency") or "CNY")
 
 
 def set_price_full(model: str, provider: str, price: float, currency: str = "CNY",
-                   source: str = "manual", note: str = "") -> None:
+                   source: str = "manual", note: str = "", variants=None,
+                   clear_variants: bool = False) -> None:
+    """写一行单价。`variants` 传 dict / JSON 串 → 覆盖阶梯价；不传 → **保留**原有阶梯价
+    （上游同步不会把手工填的阶梯冲掉）；`clear_variants=True` → 显式清空阶梯价。"""
+    payload = None
+    if variants:
+        payload = variants if isinstance(variants, str) else json.dumps(variants, ensure_ascii=False)
+    keep = "excluded.variants" if (payload is not None or clear_variants) else "model_prices.variants"
     with connect() as c:
-        c.execute("""INSERT INTO model_prices(model,provider,price,currency,unit,source,note,updated_at)
-                     VALUES(?,?,?,?,'image',?,?,?)
+        c.execute(f"""INSERT INTO model_prices(model,provider,price,currency,unit,source,note,updated_at,variants)
+                     VALUES(?,?,?,?,'image',?,?,?,?)
                      ON CONFLICT(model,provider) DO UPDATE SET price=excluded.price,
                      currency=excluded.currency,source=excluded.source,note=excluded.note,
-                     updated_at=excluded.updated_at""",
+                     updated_at=excluded.updated_at, variants={keep}""",
                   (model, provider or "*", float(price or 0), currency or "CNY", source, note or "",
-                   int(time.time())))
+                   int(time.time()), payload))
 
 
 # ------------------------------------------------------------------ 路由规则

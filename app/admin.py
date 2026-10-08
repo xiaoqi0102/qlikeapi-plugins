@@ -729,6 +729,10 @@ def api_models(request: Request):
                         "price": pr.get("price"), "currency": pr.get("currency"),
                         "source": pr.get("source"), "price_note": pr.get("note"),
                         "price_id": pr.get("id"),
+                        # 阶梯价（variants JSON 原文 + 档数），前端自己解析展示
+                        "variants": pr.get("variants"),
+                        "variant_count": len(((json.loads(pr["variants"]) if isinstance(pr.get("variants"), str) else (pr.get("variants") or {})).get("prices") or [])
+                                             if pr.get("variants") else []),
                         # 这一格的价格是从哪一层取到的：渠道专属 / 模型全局 / 兜底（*、*）
                         "price_scope": (None if not pr else
                                         ("provider" if pr.get("provider") == p["key"] else
@@ -1194,7 +1198,8 @@ async def api_price_set(request: Request):
     if not d.get("model"):
         return JSONResponse({"error": "model 必填"}, status_code=400)
     store.set_price_full(d["model"], d.get("provider") or "*", float(d.get("price") or 0),
-                         d.get("currency") or "CNY", d.get("source") or "manual", d.get("note") or "")
+                         d.get("currency") or "CNY", d.get("source") or "manual", d.get("note") or "",
+                         d.get("variants"), bool(d.get("clear_variants")))
     return {"ok": True}
 
 

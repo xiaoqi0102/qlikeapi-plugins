@@ -488,7 +488,10 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
         if isinstance(out, JSONResponse):
             return out, {"ms": int((time.time() - t0) * 1000), "upstream_status": status}
         images = len((out or {}).get("data") or []) or int(body.get("n") or 1)
-        cost, currency = store.estimate_cost(provider, body.get("model") or "", images)
+        # 阶梯价：把请求体的 quality / resolution / size 一起带上（缺档位时按像素推），
+        # 命不中会回落该行的扁平单价
+        cost, currency = store.estimate_cost(provider, body.get("model") or "", images,
+                                             protocols.price_params(body))
         store.clear_provider_fail(provider)          # 成功一次 → 失败计数清零
         store.bump_token_usage(tk_id, images=images, cost=cost)
         if do_log:

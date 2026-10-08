@@ -383,7 +383,7 @@ const act = {
       ['模型','生效渠道','单价（元/张）','备注',''],
       prices.map(p => [`<span class="mono">${esc(p.model)}</span>`,
         p.provider === '*' ? pill('', '全局') : `<span class="chip mono">${esc(p.provider)}</span>`,
-        `<span class="num">${(p.price||0).toFixed(4)}</span>`, `<span class="hint">${esc(p.note||'')}</span>`,
+        `<span class="num">${(p.price||0).toFixed(4)}</span>${act.tierTag(p)}`, `<span class="hint">${esc(p.note||'')}</span>`,
         `<button class="btn btn-sm btn-outline-danger" onclick="act.delPrice(${p.id})">删除</button>`]))
       + `<div class="row mt-3">
            <input class="form-control form-control-sm" id="pModel" placeholder="模型名（* 为兜底）" style="width:230px">
@@ -422,6 +422,7 @@ const act = {
   /* ---- 模型目录：手动改价（写「客户端模型名 + 渠道」这一格，source=manual）---- */
   priceEdit(provider, model) {
     const m = (state._modelRows || []).find(x => x.provider === provider && x.model === model) || {};
+    act.varState = act.varLoad(m);                    // 阶梯价表单状态（替代原来的 JSON 文本框）
     const cur = m.currency || 'USD';
     const srcLabel = act.priceSrcLabel(m);
     const now = m.price == null ? '<span class="hint">未定价</span>'
@@ -439,6 +440,25 @@ const act = {
           <input class="form-control" id="mpNote" value="${esc(m.price_note || '')}"
                  placeholder="比如：Ozon 主图按 0.02 结算"></div>
       </div>
+      <div class="row g-3 mt-1">
+        <div class="col-12"><label class="form-label">阶梯价（可选）</label>
+          <div class="row g-2 align-items-end">
+            <div class="col-md-7">
+              <div class="hint mb-1">维度（逗号分隔，如 <span class="mono">quality, resolution</span>）</div>
+              <input class="form-control form-control-sm mono" id="mpVarDims"
+                     value="${esc((act.varDimsOf(m) || []).join(', '))}"
+                     placeholder="quality, resolution" oninput="act.varDimsChanged()">
+            </div>
+            <div class="col-md-5 text-end">
+              <button class="btn btn-sm btn-outline-secondary" onclick="act.varAddRow()"><i class="ti ti-plus"></i> 加一档</button>
+              <button class="btn btn-sm btn-outline-danger" onclick="act.varClear()"><i class="ti ti-eraser"></i> 清空阶梯</button>
+            </div>
+          </div>
+          <div id="mpVarRows" class="mt-2"></div>
+          <div class="hint mt-1">每行 = 一档：按上面的维度填值 + 单价。<b>维度值全部一致（大小写不敏感）才按这档算，没命中的请求回落上面的扁平单价</b>。
+            没有档位 = 只有扁平单价。例：gpt-image-2-all 维度填 <span class="mono">quality, resolution</span>，共 9 档。</div>
+        </div>
+      </div>
       <div class="hint mt-2">渠道 <span class="mono">${esc(provider)}</span> · 模型 <span class="mono">${esc(model)}</span>
         · 当前：${now}（来源 ${esc(srcLabel)}）</div>
       <div class="hint mt-1"><i class="ti ti-info-circle"></i> 手工价<b>不会被「同步价格」覆盖</b>：
@@ -446,13 +466,91 @@ const act = {
       `<button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
        ${m.source === 'manual' && m.price_id ? `<button class="btn btn-outline-danger" onclick="act.priceClear(${m.price_id})"><i class="ti ti-eraser"></i> 清除手工价</button>` : ''}
        <button class="btn btn-primary" onclick="act.priceSave('${esc(provider)}','${esc(model)}')"><i class="ti ti-device-floppy"></i> 保存</button>`);
+    act.varRender();
+  },
+
+  /* ---------- 阶梯价表单（维度列 + 每档一行，比裸 JSON 直观） ---------- */
+
+  varState: {dims: [], rows: []},
+
+  /* 把某一行的 variants（JSON 串 / 对象）读成表单初始状态 */
+  varParse(v) {
+    if (!v) return null;
+    if (typeof v === 'string') { try { return JSON.parse(v); } catch (e) { return null; } }
+    return v;
+  },
+  varDimsOf(m) {
+    const v = act.varParse(m && m.variants);
+    return (v && v.dimensions) || [];
+  },
+  varLoad(m) {
+    const v = act.varParse(m && m.variants) || {};
+    return {dims: v.dimensions || [], rows: (v.prices || []).map(e => ({params: (e && e.params) || {}, price: (e && e.price) == null ? '' : e.price}))};
+  },
+  /* DOM → 状态（增删行 / 保存前都要先同步，别丢用户刚敲的字） */
+  varSyncFromDom() {
+    const box = document.getElementById('mpVarRows');
+    if (!box) return;
+    const dimsEl = document.getElementById('mpVarDims');
+    const dims = (dimsEl ? dimsEl.value : '').split(/[,，;；\s]+/).map(s => s.trim()).filter(Boolean);
+    const rows = [];
+    box.querySelectorAll('[data-var-row]').forEach(el => {
+      const i = parseInt(el.getAttribute('data-var-row'), 10);
+      rows[i] = rows[i] || {params: {}, price: ''};
+      const d = el.getAttribute('data-var-dim');
+      if (d) rows[i].params[d] = el.value.trim();
+      else rows[i].price = el.value;
+    });
+    act.varState = {dims: dims, rows: rows.filter(Boolean)};
+  },
+  varRender() {
+    const box = document.getElementById('mpVarRows');
+    if (!box) return;
+    const dims = act.varState.dims, rows = act.varState.rows;
+    if (!dims.length) { box.innerHTML = '<div class="hint">先填「维度」再点「加一档」（例如维度 quality, resolution）。</div>'; return; }
+    box.innerHTML = `<table class="table tb mb-0"><thead><tr>${dims.map(d => `<th>${esc(d)}</th>`).join('')}<th class="num-col">单价</th><th style="width:46px"></th></tr></thead><tbody>${
+      rows.map((r, i) => `<tr>${dims.map(d => {
+        const val = ((r.params || {})[d] == null ? '' : String((r.params || {})[d]));
+        return `<td><input class="form-control form-control-sm mono" data-var-row="${i}" data-var-dim="${esc(d)}" value="${esc(val)}" placeholder="${esc(d)}"></td>`;
+      }).join('')}<td><input class="form-control form-control-sm mono" type="number" step="0.0001" min="0" data-var-row="${i}" value="${esc(String(r.price == null ? '' : r.price))}" placeholder="单价"></td><td><button class="btn btn-sm btn-outline-danger" aria-label="删除这一档" onclick="act.varDelRow(${i})"><i class="ti ti-trash"></i></button></td></tr>`).join('')
+    }</tbody></table>`;
+  },
+  varDimsChanged() { act.varSyncFromDom(); act.varRender(); },
+  varAddRow() { act.varSyncFromDom(); act.varState.rows.push({params: {}, price: ''}); act.varRender(); },
+  varDelRow(i) { act.varSyncFromDom(); act.varState.rows.splice(i, 1); act.varRender(); },
+  varClear() {
+    act.varState = {dims: [], rows: []};
+    const d = document.getElementById('mpVarDims'); if (d) d.value = '';
+    act.varRender();
+  },
+  /* 表单 → 提交用的 variants；没填任何档位返回 null（= 清掉阶梯价） */
+  varBuild() {
+    act.varSyncFromDom();
+    const dims = act.varState.dims, rows = act.varState.rows;
+    if (!dims.length || !rows.length) return {variants: null};
+    const prices = [];
+    for (const r of rows) {
+      const p = {};
+      for (const d of dims) {
+        const v = String((r.params || {})[d] == null ? '' : (r.params || {})[d]).trim();
+        if (!v) return {error: `有一档的「${d}」没填`};
+        p[d] = v;
+      }
+      const price = parseFloat(r.price);
+      if (!(price >= 0)) return {error: `「${dims.map(d => p[d]).join('·')}」这一档的单价没填或不是数字`};
+      prices.push({params: p, price: price});
+    }
+    return {variants: {dimensions: dims, prices: prices}};
   },
 
   async priceSave(provider, model) {
     const v = parseFloat($('#mpPrice').value);
     if (!(v >= 0)) return toast('单价请填一个不小于 0 的数字（想取消定价就点「清除手工价」）', true);
+    const vb = act.varBuild();
+    if (vb.error) return toast(vb.error, true);
     const r = await api('/api/prices', {method: 'POST', body: {model, provider, price: v,
-      currency: $('#mpCur').value, source: 'manual', note: $('#mpNote').value.trim()}});
+      currency: $('#mpCur').value, source: 'manual', note: $('#mpNote').value.trim(),
+      variants: vb.variants, clear_variants: !vb.variants}});
     if (!r || !r.ok) return toast('保存失败', true);
     UI.closeModal();
     toast(`已保存手工单价 · ${model}`);
@@ -1439,6 +1537,19 @@ const act = {
     return m.price_scope === 'global' ? '兜底价' : '全局价';
   },
 
+  /* 阶梯价（variants）小标签：悬停能看到每一档；没有阶梯就返回空串。
+     形状与上游站点 /api/pricing 的 variants 同构：{dimensions:[...], prices:[{params,price}]} */
+  tierTag(row) {
+    const v = row && row.variants ? (typeof row.variants === 'string' ? JSON.parse(row.variants) : row.variants) : null;
+    const list = (v && v.prices) || [];
+    if (!list.length) return '';
+    const dims = (v.dimensions || []);
+    const cur = row.currency === 'USD' ? '$' : '¥';
+    const txt = list.map(e => dims.map(d => (e.params || {})[d] ?? '').join('·') +
+      ' → ' + cur + Number(e.price || 0).toFixed(4)).join('\n');
+    return ` <span class="chip" style="cursor:help" title="${esc(dims.join(' × ') + '\n' + txt)}">阶梯 ${list.length} 档</span>`;
+  },
+
   DIRCOLS: {widths: ['19%', '24%', '11%', '28%', '9%', '9%'],
             hcls: ['', '', 'num-col', 'src-col', 'ctr', 'ctr'],
             ccls: ['', '', 'num-col', 'src-col', 'ctr', 'ctr'], cls: 'tb-dir'},
@@ -1463,7 +1574,7 @@ const act = {
             const money = `<span class="price-cell">${m.price == null ? '<span class="hint">未定价</span>'
               : `<b class="num">${m.currency === 'USD' ? '$' : '¥'}${Number(m.price).toFixed(4)}</b><span class="hint"> /张</span>`}<button
                 class="btn btn-sm btn-outline-secondary" title="手动改这一格的单价（手工价不会被「同步价格」覆盖）"
-                aria-label="手动改价" onclick="act.priceEdit('${esc(k)}','${esc(m.model)}')"><i class="ti ti-pencil"></i></button></span>`;
+                aria-label="手动改价" onclick="act.priceEdit('${esc(k)}','${esc(m.model)}')"><i class="ti ti-pencil"></i></button>${act.tierTag(m)}</span>`;
             return [`<span class="mono" title="${esc(m.model)}">${esc(m.model)}</span>`,
               `<span class="mono" title="${esc(m.upstream)}">${esc(m.upstream)}</span>`,
               money, pill(src[0], src[1]) + (m.price_note ? `<span class="src-note" title="${esc(m.price_note)}">${esc(m.price_note)}</span>` : ''),

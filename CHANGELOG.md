@@ -1,3 +1,33 @@
+## v3.17.1 — 2026-10-08
+
+### 改：阶梯价改成「表单」录入（用户反馈：裸 JSON 不直观）
+
+- 「手动改价」弹窗里的阶梯价，从**一个 JSON 文本框**改成**表单**：上面一行填**维度**
+  （逗号分隔，如 `quality, resolution`），下面每行 = 一档（每个维度一个输入框 + 一个单价输入框 +
+  删除按钮），配「加一档 / 清空阶梯」。填什么维度就出什么列，增删行不会丢已填内容。
+- 保存时前端把表单拼回 `variants`（形状不变，后端零改动）；没填任何档位 = 清掉阶梯价。
+  某一档维度值或单价没填全 → **本地拦下并提示是哪一档**，不会静默丢档。
+- 展示端不变：模型目录「真实单价」与「模型单价」表仍显示 `阶梯 N 档`（悬停看每档）。
+
+## v3.17.0 — 2026-10-08
+
+### 新：模型单价支持「阶梯价」（variants）+ 接入 AI-Tudou（土豆API）
+
+- **`model_prices.variants`（新列）**：一个模型可以按请求参数分档计价，形状与上游站点的
+  `/api/pricing` variants 同构 ——
+  `{"dimensions":["quality","resolution"],"prices":[{"params":{"quality":"low","resolution":"1k"},"price":0.03}, …]}`。
+  命中规则：`dimensions` 里**每个维度都要和请求体的同名参数一致**（大小写不敏感），命中一格按那格算，
+  **命不中就回落行内扁平单价**（老数据零迁移，行为不变）。
+- **请求日志的费用**：`estimate_cost()` 现在把请求体的 `quality` / `resolution` / `size` 一起带进来算
+  （`protocols.price_params()`；客户端只给像素 size 时按像素推一个 1K/2K/4K 档，否则按 resolution 分档的阶梯价永远命不中），所以 gpt-image-2-all 这种 9 档阶梯价能记准，不再是单一价。
+- **面板**：模型目录「真实单价」列与「模型单价」表在阶梯价旁显示 `阶梯 N 档` 标签（悬停看每一档）；
+  「手动改价」弹窗新增**阶梯价 JSON 编辑框**（留空保存 = 清掉阶梯价）。手工价照旧不会被「同步价格」覆盖。
+- **新渠道插件 `tudou`**（AI-Tudou / 土豆API，https://api.ai-tudou.net）：一个实例覆盖两面 ——
+  `gemini-*` 走 Gemini 原生 `POST /v1beta/models/{model}:generateContent`（`imageConfig` 控比例/分辨率、
+  参考图只吃 base64 且图片 parts 放文本前、`responseModalities` 固定 `["TEXT","IMAGE"]`）；
+  `gpt-image-2-all` 走异步 `POST /v1/images/generations/async` → 轮询 `GET /v1/tasks/{id}`
+  （`data.result.images[0].url[0]`），由插件 `poll()` 钩子兜住，客户端仍拿同步结果。
+
 ## v3.16.2 — 2026-09-19
 
 ### 修：图床每行的启停开关 + 操作列对齐（用户反馈）

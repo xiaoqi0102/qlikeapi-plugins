@@ -508,6 +508,29 @@ def _size_meta(from_s: str, to_s: str, note: str, extra: str = "") -> dict:
     return {"size_from": from_s, "size_to": to_s, "size_note": note, "size_hdr": hdr}
 
 
+def price_params(body: dict | None) -> dict:
+    """估算费用时用的「参与阶梯定价的参数」：quality / resolution / size。
+
+    客户端一般只给像素 size（如 1024x1024），不给档位 —— 这时按像素推一个 resolution 档
+    （口径与 Gemini 面一致：1K/2K/4K），否则「按 resolution 分档」的阶梯价永远命不中。
+    值大小写由定价侧统一按小写比对。
+    """
+    b = body or {}
+    out: dict = {}
+    for k in ("quality", "resolution", "size"):
+        v = b.get(k)
+        if isinstance(v, str) and v.strip():
+            out[k] = v.strip()
+    if "resolution" not in out:
+        wh = utils.parse_size(out.get("size"))
+        if wh:
+            try:
+                out["resolution"] = str(utils.resolution_of(wh[0], wh[1])).strip()
+            except Exception:                          # noqa: BLE001 —— 推不出就不给这一维
+                pass
+    return out
+
+
 def build_gemini_native(p: dict, body: dict, edit: bool = False) -> tuple[str, dict, dict]:
     model = body.get("model") or ""
     up_model = upstream_model(p, model)
