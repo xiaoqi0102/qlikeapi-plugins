@@ -2,7 +2,7 @@
 
 > **版本**：v1.1　**更新日期**：2026-10-08　**适用网关**：New API v1.0.0-rc.41
 > **本文档面向调用方**：一个 Base URL、一个密钥，即可调用文本、图片、视频三类能力，请求与返回全部为 **OpenAI 风格**。
-> **在线版**：`https://img.qlike.top/api-docs`　**Markdown 下载**：`https://img.qlike.top/api-docs.md?download=1`
+> **在线版**：`https://api.qlike.top/api-docs`　**Markdown 下载**：`https://api.qlike.top/api-docs.md?download=1`　（备用域名 `img.qlike.top` 同样可用）
 
 ---
 

@@ -1,3 +1,14 @@
+## v3.21.2 — 2026-10-08
+
+### 修：接口文档页在 api.qlike.top 上「文档加载失败」
+
+- **根因**：`docs.html` 原来外链 `/static/vendor/marked.min.js`。`api.qlike.top` 上只有
+  `/api-docs*` 转发到本网关，其余路径归 New API 面板（它自己也用 `/static/`），
+  于是 marked 取回的是 New API 的 SPA 首页 HTML → `marked is not defined`。
+- **做法**：marked.min.js 与 logo 全部**内联**进 `docs.html`（单文件自包含），
+  任何域名/挂载路径下都能渲染；实测 api 域、img 域均正常（36 标题/23 表格/20 代码块/35 目录项，控制台 0 报错）。
+- 文档正文「在线版/下载」链接改为 `api.qlike.top`（与调用端 Base URL 同域），`img.qlike.top` 标注为备用。
+
 ## v3.21.1 — 2026-10-08
 
 ### 新：视频详情里的「上游报文」= 真报文（插件补写）
