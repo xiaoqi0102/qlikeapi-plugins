@@ -398,6 +398,63 @@ def _imagehost_info(meta: dict) -> dict:
             "imagehost_raw": notes}          # 原始明细，供路由汇总行落库（面板据此显示转换说明）
 
 
+def _convert_detail(notes: list) -> dict:
+    """转换笔记 → 素材日志明细（纯函数，单测用）。空列表 → {}。"""
+    ups = [n for n in notes if n.get("host")]
+    ins = [n for n in notes if n.get("mode") == "inline"]
+    fails = [n for n in notes if n.get("fallback")]
+    if not notes:
+        return {}
+    if ups and ins:
+        direction = "base64→公网直链 与 URL→内联base64（双向）"
+    elif ups:
+        direction = "base64→公网直链"
+    elif ins:
+        direction = "URL→内联base64"
+    else:
+        direction = "转换失败（按原样转发）"
+    return {"mode": "convert", "source": "auto", "source_label": "生成时自动转换",
+            "direction": direction, "count": len(notes),
+            "bytes": sum(int(n.get("bytes") or 0) for n in notes),
+            "hosts": sorted({n.get("host") for n in ups if n.get("host")}),
+            "urls": [n.get("url") for n in ups if n.get("url")],
+            "warnings": [w for n in notes for w in (n.get("warnings") or [])],
+            "items": notes, "parent_log_id": None}
+
+
+def _convert_material_row(meta: dict, provider: str, model: str, tk_name: str, tk_id) -> dict | None:
+    """组装一条 kind='convert' 的素材日志行（不落库）；没有转换则 None。"""
+    detail = _convert_detail((meta or {}).get("imagehost") or [])
+    if not detail:
+        return None
+    fails = [n for n in detail["items"] if n.get("fallback")]
+    return {"provider": provider, "model": model, "public_path": "/v1/files#convert",
+            "status": 502 if fails else 200, "up_status": None, "ms": None,
+            "error": ("；".join(detail["warnings"]) if fails else None),
+            "req": detail, "up_req": None, "snippet": None, "kind": "convert",
+            "token": tk_name or "", "token_id": tk_id}
+
+
+def _log_convert_material(parent_id, meta: dict, provider: str, model: str,
+                          tk_name: str = "", tk_id=None) -> int | None:
+    """把「生成过程中自动发生的 base64↔直链转换」单独记进素材日志（kind='convert'）并挂回
+    它所属的那条生成日志（parent_log_id）。请求日志里只留一个「看素材日志」的入口。"""
+    row = _convert_material_row(meta, provider, model, tk_name, tk_id)
+    if not row or not parent_id:
+        return None
+    detail = dict(row["req"])
+    detail["parent_log_id"] = int(parent_id)
+    try:
+        return store.log_row(row["provider"], row["model"], row["public_path"], row["status"],
+                             row["up_status"], row["ms"], row["error"], detail, None, None,
+                             kind="convert", token=row["token"], token_id=row["token_id"],
+                             imagehost=detail, parent_log_id=int(parent_id))
+    except TypeError:          # 兼容旧签名（无 parent_log_id 参数时）
+        return store.log_row(row["provider"], row["model"], row["public_path"], row["status"],
+                             row["up_status"], row["ms"], row["error"], detail, None, None,
+                             kind="convert", token=row["token"], token_id=row["token_id"])
+
+
 def _countable_failure(status: int | None) -> bool:
     """这次失败要不要算到「渠道连续失败」里（够数就自动停用该渠道）。"""
     if status is None:                 # 连接失败/超时
@@ -471,12 +528,13 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
             if status in RETRYABLE and attempt < MAX_KEY_ATTEMPTS:
                 continue
             if do_log:
-                store.log_row(provider, body.get("model"), f"/up/{provider}/v1/images", status, status,
-                              int((time.time() - t0) * 1000), msg, body, up_body, up_text,
-                              kind=log_kind, attempts=attempt, key_index=idx,
-                              token=tk_name, token_id=tk_id,
-                              up_url=url, up_method="POST", up_headers=_redact_headers(headers, secret),
-                              imagehost=(meta or {}).get("imagehost"))
+                _pid = store.log_row(provider, body.get("model"), f"/up/{provider}/v1/images", status, status,
+                                     int((time.time() - t0) * 1000), msg, body, up_body, up_text,
+                                     kind=log_kind, attempts=attempt, key_index=idx,
+                                     token=tk_name, token_id=tk_id,
+                                     up_url=url, up_method="POST", up_headers=_redact_headers(headers, secret),
+                                     imagehost=(meta or {}).get("imagehost"))
+                _log_convert_material(_pid, meta, provider, body.get("model"), tk_name, tk_id)
             if _countable_failure(status):          # 渠道级失败计数（够数自动停用）
                 store.bump_provider_fail(provider, f"上游 {status}: {msg[:160]}", disconnect=True)
             return JSONResponse({"error": {"message": f"upstream {status}: {msg}", "type": "upstream_error",
@@ -495,13 +553,14 @@ def invoke_provider(p: dict, body: dict, edit: bool, access: dict | None = None,
         store.clear_provider_fail(provider)          # 成功一次 → 失败计数清零
         store.bump_token_usage(tk_id, images=images, cost=cost)
         if do_log:
-            store.log_row(provider, body.get("model"), f"/up/{provider}/v1/images", 200, status,
-                          int((time.time() - t0) * 1000), None, body, up_body,
-                          json.dumps(out, ensure_ascii=False)[:1200], kind=log_kind,
-                          attempts=attempt, key_index=idx, images=images, cost=cost, cost_currency=currency,
-                          token=tk_name, token_id=tk_id,
-                          up_url=url, up_method="POST", up_headers=_redact_headers(headers, secret),
-                          imagehost=(meta or {}).get("imagehost"))
+            _pid = store.log_row(provider, body.get("model"), f"/up/{provider}/v1/images", 200, status,
+                                 int((time.time() - t0) * 1000), None, body, up_body,
+                                 json.dumps(out, ensure_ascii=False)[:1200], kind=log_kind,
+                                 attempts=attempt, key_index=idx, images=images, cost=cost, cost_currency=currency,
+                                 token=tk_name, token_id=tk_id,
+                                 up_url=url, up_method="POST", up_headers=_redact_headers(headers, secret),
+                                 imagehost=(meta or {}).get("imagehost"))
+            _log_convert_material(_pid, meta, provider, body.get("model"), tk_name, tk_id)
         return out, {"ms": int((time.time() - t0) * 1000), "upstream_status": status,
                      "images": images, "cost": cost, "currency": currency, "attempts": attempt,
                      # 上游报文/地址：供路由汇总行落库，让客户端那一行也能看到「② 本网关 → 上游」

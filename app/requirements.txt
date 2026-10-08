@@ -2,3 +2,5 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 httpx==0.28.1
 python-multipart==0.0.32
+# 生成日志：只读直连 New API 的 postgres（拉视频/任务型请求的请求快照）
+psycopg2-binary==2.9.10

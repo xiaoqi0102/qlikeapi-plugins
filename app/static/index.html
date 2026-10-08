@@ -29,7 +29,7 @@
       <a class="item" href="#models" data-v="models"><i class="ti ti-sitemap"></i>模型目录</a>
       <a class="item" href="#tokens" data-v="tokens"><i class="ti ti-key"></i>访问令牌</a>
       <a class="item" href="#plugins" data-v="plugins"><i class="ti ti-puzzle"></i>渠道插件</a>
-      <a class="item" href="#logs" data-v="logs"><i class="ti ti-notebook"></i>请求日志</a>
+      <a class="item" href="#logs" data-v="logs"><i class="ti ti-notebook"></i>生成日志</a>
       <a class="item" href="#materials" data-v="materials"><i class="ti ti-cloud-upload"></i>素材日志</a>
       <a class="item" href="#jobs" data-v="jobs"><i class="ti ti-hourglass"></i>异步任务</a>
       <a class="item" href="#balances" data-v="balances"><i class="ti ti-wallet"></i>站点余额</a>
@@ -198,23 +198,31 @@
       </div>
     </section>
 
-    <!-- ================= 请求日志 ================= -->
+    <!-- ================= 生成日志（图片 + 视频） ================= -->
     <section id="v-logs" hidden>
       <div class="panel">
         <header>
-          <h3><i class="ti ti-notebook"></i>请求日志</h3>
+          <h3><i class="ti ti-notebook"></i>生成日志 <span class="hint">图片走本网关 · 视频走 New API，统一时间轴</span></h3>
           <div class="acts">
-            <select class="form-select form-select-sm" id="logProvider" style="width:170px" onchange="act.loadLogs()"><option value="">全部渠道</option></select>
-            <select class="form-select form-select-sm" id="logStatus" style="width:130px" onchange="act.loadLogs()">
+            <div class="seg" data-seg="logsrc">
+              <button class="on" data-src="all" onclick="act.logSource('all')">全部</button>
+              <button data-src="image" onclick="act.logSource('image')">图片</button>
+              <button data-src="video" onclick="act.logSource('video')">视频</button>
+            </div>
+            <select class="form-select form-select-sm" id="logDays" style="width:120px" onchange="act.logsSize(state.logs.size)">
+              <option value="7">近 7 天</option><option value="30" selected>近 30 天</option>
+              <option value="90">近 90 天</option><option value="0">全部时间</option>
+            </select>
+            <select class="form-select form-select-sm" id="logProvider" style="width:160px" onchange="act.loadLogs()"><option value="">全部渠道</option></select>
+            <select class="form-select form-select-sm" id="logStatus" style="width:120px" onchange="act.loadLogs()">
               <option value="">全部状态</option><option value="ok">成功</option><option value="err">失败</option>
             </select>
-            <select class="form-select form-select-sm" id="logToken" style="width:150px" onchange="act.loadLogs()"><option value="">全部令牌</option></select>
-            <select class="form-select form-select-sm" id="logKind" style="width:150px" onchange="act.loadLogs()">
+            <select class="form-select form-select-sm" id="logToken" style="width:140px" onchange="act.loadLogs()"><option value="">全部令牌</option></select>
+            <select class="form-select form-select-sm" id="logKind" style="width:130px" onchange="act.loadLogs()">
               <option value="">全部类型</option><option value="relay">转发</option>
-              <option value="client">本地校验</option><option value="probe">探活</option>
-              <option value="upload">素材中转</option>
+              <option value="router">路由汇总</option><option value="client">本地校验</option><option value="probe">探活</option>
             </select>
-            <input class="form-control form-control-sm" id="logQ" placeholder="搜索模型 / 错误 / 路径" style="width:200px" onkeydown="if(event.key==='Enter')act.loadLogs()">
+            <input class="form-control form-control-sm" id="logQ" placeholder="搜索模型 / 任务号 / 提示词 / 错误" style="width:220px" onkeydown="if(event.key==='Enter')act.loadLogs()">
             <button class="btn btn-sm btn-outline-secondary" onclick="act.loadLogs()"><i class="ti ti-search"></i> 查询</button>
           </div>
         </header>
@@ -226,8 +234,13 @@
     <section id="v-materials" hidden>
       <div class="panel">
         <header>
-          <h3><i class="ti ti-cloud-upload"></i>素材中转日志 <span class="hint">图片 / 视频 / 音频 → 公网直链的完整转换过程</span></h3>
+          <h3><i class="ti ti-cloud-upload"></i>素材日志 <span class="hint">两类分开：客户端主动上传 · 生成时自动转换</span></h3>
           <div class="acts">
+            <select class="form-select form-select-sm" id="matSource" style="width:170px" onchange="act.matSource()">
+              <option value="">全部来源</option>
+              <option value="upload">客户端上传（/v1/files）</option>
+              <option value="convert">生成时自动转换</option>
+            </select>
             <select class="form-select form-select-sm" id="matKind" style="width:130px" onchange="act.loadMaterials()">
               <option value="">全部类型</option><option value="image">图片</option>
               <option value="video">视频</option><option value="audio">音频</option>

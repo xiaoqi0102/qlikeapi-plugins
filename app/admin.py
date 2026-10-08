@@ -700,7 +700,7 @@ def api_provider_fetch_models(key: str, request: Request):
 
 @router.get("/logs")
 def api_logs(request: Request, limit: int = 50, offset: int = 0, provider: str = "", status: str = "",
-             q: str = "", kind: str = "", token: str = ""):
+             q: str = "", kind: str = "", token: str = "", kinds: str = "", parent: str = ""):
     u, err = need_user(request)
     if err:
         return err
@@ -711,6 +711,17 @@ def api_logs(request: Request, limit: int = 50, offset: int = 0, provider: str =
     if kind:
         where.append("kind=?")
         args.append(kind)
+    elif kinds:
+        ks = [k.strip() for k in kinds.split(",") if k.strip()]
+        if ks:
+            where.append("kind IN (%s)" % ",".join("?" * len(ks)))
+            args += ks
+    if parent:
+        try:
+            where.append("parent_log_id=?")
+            args.append(int(parent))
+        except (TypeError, ValueError):
+            pass
     if token == "0":
         where.append("COALESCE(token_id,0)=0")
     elif token:
@@ -739,6 +750,160 @@ def api_log_detail(log_id: int, request: Request):
         return err
     row = store.one("SELECT * FROM logs WHERE id=?", (log_id,))
     return row or JSONResponse({"error": "not found"}, status_code=404)
+
+
+# ------------------------------------------------------------------ 生成日志（图片 + 视频，统一时间轴）
+
+IMAGE_KINDS = ("relay", "router", "client", "probe")
+
+
+def _cursor_decode(cursor: str) -> dict:
+    """游标 {"i":[ts,id],"v":{"ts":t,"seen":[ids]}}：两个来源各自 keyset 分页，前端原样带回。"""
+    if not cursor:
+        return {}
+    try:
+        import base64
+        return json.loads(base64.urlsafe_b64decode(cursor.encode()).decode()) or {}
+    except Exception:                                  # noqa: BLE001
+        return {}
+
+
+def _cursor_encode(cur: dict) -> str:
+    import base64
+    clean = {k: v for k, v in (cur or {}).items() if v}
+    return base64.urlsafe_b64encode(json.dumps(clean).encode()).decode()
+
+
+def _shape_local(r: dict) -> dict:
+    """本机 sqlite 行 → 面板行（字段名与老「请求日志」保持一致，再加分类标签）。"""
+    return {"src": "image", "id": f"i{r['id']}", "ts": r.get("ts"), "kind": r.get("kind"),
+            "provider": r.get("provider"), "model": r.get("model"), "public_path": r.get("public_path"),
+            "http_status": r.get("http_status"), "upstream_status": r.get("upstream_status"),
+            "ms": r.get("ms"), "error": r.get("error"), "token": r.get("token"),
+            "token_id": r.get("token_id"), "attempts": r.get("attempts"),
+            "key_index": r.get("key_index"), "images": r.get("images"), "cost": r.get("cost"),
+            "cost_currency": r.get("cost_currency"), "imagehost": r.get("imagehost"),
+            "parent_log_id": r.get("parent_log_id"), "tags": ["图片"]}
+
+
+def _local_page(limit: int, cur, provider="", status="", q="", token="", kinds=IMAGE_KINDS, days=0):
+    """本机生成日志一页（keyset：ts DESC, id DESC）。返回 (行, 新游标)。"""
+    where, args = ["kind IN (%s)" % ",".join("?" * len(kinds))], list(kinds)
+    if provider:
+        where.append("provider=?")
+        args.append(provider)
+    if token == "0":
+        where.append("COALESCE(token_id,0)=0")
+    elif token:
+        where.append("token_id=?")
+        args.append(int(token))
+    if status == "ok":
+        where.append("http_status<400")
+    elif status == "err":
+        where.append("http_status>=400")
+    if q:
+        where.append("(COALESCE(model,'') LIKE ? OR COALESCE(error,'') LIKE ? OR COALESCE(public_path,'') LIKE ?)")
+        args += [f"%{q}%"] * 3
+    if days:
+        where.append("ts >= ?")
+        args.append(int(time.time()) - int(days) * 86400)
+    if cur and len(cur) == 2:
+        where.append("(ts < ? OR (ts = ? AND id < ?))")
+        args += [int(cur[0]), int(cur[0]), int(cur[1])]
+    rows = store.rows("SELECT * FROM logs WHERE " + " AND ".join(where)
+                      + " ORDER BY ts DESC, id DESC LIMIT ?", tuple(args + [int(limit)]))
+    newcur = [int(rows[-1]["ts"]), int(rows[-1]["id"])] if rows else (cur or None)
+    return [_shape_local(r) for r in rows], newcur
+
+
+@router.get("/genlogs")
+def api_genlogs(request: Request, source: str = "all", limit: int = 50, cursor: str = "",
+                provider: str = "", status: str = "", q: str = "", model: str = "",
+                channel: str = "", token: str = "", kind: str = "", days: int = 30):
+    """生成日志：图片（本机 sqlite）+ 视频（只读 New API 库）统一时间轴。
+
+    · source=image 只查本机；source=video 只查 New API；all 两边合并
+    · 分页走游标（两个来源各自的 keyset），不随新日志插入而错位
+    · New API 不可用时只影响视频部分，图片照常返回，并在 video.note 里说明原因
+    """
+    u, err = need_user(request)
+    if err:
+        return err
+    from . import newapi
+    limit = max(1, min(int(limit or 50), 200))
+    cur = _cursor_decode(cursor)
+    rows: list[dict] = []
+    if source in ("all", "image"):
+        kinds = (kind,) if kind else IMAGE_KINDS
+        got, cur["i"] = _local_page(limit, cur.get("i"), provider=provider, status=status, q=q,
+                                    token=token, kinds=kinds, days=days)
+        rows += got
+    vstate = {"available": True, "note": ""}
+    if source in ("all", "video"):
+        ok, why = newapi.available()
+        vstate = {"available": ok, "note": why}
+        if ok:
+            vc = cur.get("v") if isinstance(cur.get("v"), dict) else None
+            v = newapi.video_logs(limit=limit, status=status, model=model, channel=channel,
+                                  token=token, q=q, days=days, cursor=vc)
+            if v.get("next"):
+                cur["v"] = v["next"]
+            rows += v["rows"]
+    rows.sort(key=lambda r: (int(r.get("ts") or 0), 1 if r.get("src") == "video" else 0), reverse=True)
+    page = rows[:limit]
+    return {"data": page, "next_cursor": _cursor_encode(cur), "video": vstate,
+            "counts": {"image": sum(1 for r in page if r["src"] == "image"),
+                       "video": sum(1 for r in page if r["src"] == "video")}}
+
+
+@router.get("/genlogs/video/{task_id}")
+def api_genlog_video(task_id: str, request: Request):
+    u, err = need_user(request)
+    if err:
+        return err
+    from . import newapi
+    row = newapi.video_log(task_id)
+    if not row:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return {"data": row}
+
+
+@router.get("/genlogs/video-stats")
+def api_genlog_video_stats(request: Request, days: int = 7):
+    u, err = need_user(request)
+    if err:
+        return err
+    from . import newapi
+    return newapi.video_stats(days=days)
+
+
+@router.get("/settings/newapi")
+def api_newapi_get(request: Request):
+    u, err = need_user(request)
+    if err:
+        return err
+    from . import newapi
+    ok, why = newapi.available()
+    return {"ok": True, "cfg": newapi.view(), "source_ok": ok, "source_note": why}
+
+
+@router.post("/settings/newapi")
+async def api_newapi_save(request: Request):
+    u, err = need_user(request)
+    if err:
+        return err
+    from . import newapi
+    d = {}
+    try:
+        d = await request.json()
+    except Exception:                                  # noqa: BLE001
+        pass
+    try:
+        newapi.save_settings(d or {})
+    except Exception as exc:                           # noqa: BLE001
+        return JSONResponse({"error": {"message": f"保存失败：{exc}"}}, status_code=400)
+    ok, why = newapi.available()
+    return {"ok": True, "cfg": newapi.view(), "source_ok": ok, "source_note": why}
 
 
 @router.get("/jobs")

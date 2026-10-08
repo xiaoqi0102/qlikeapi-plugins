@@ -145,6 +145,9 @@ MIGRATIONS = [
     ("logs", "upstream_url", "TEXT"),
     ("logs", "upstream_method", "TEXT"),
     ("logs", "upstream_headers", "TEXT"),
+    # v3.21：素材日志拆分 —— 生成过程中自动发生的 base64↔直链转换单独成行，
+    #        并用 parent_log_id 挂回它所属的那条生成日志（请求日志里只留一个「看素材日志」的入口）
+    ("logs", "parent_log_id", "INTEGER"),
 ]
 
 
@@ -250,15 +253,20 @@ def key_entries(p: dict) -> list[dict]:
 def log_row(provider, model, path, status, up_status, ms, error, req, up_req, snippet,
             kind="relay", attempts=None, key_index=None, images=None, cost=None,
             cost_currency=None, token=None, token_id=None,
-            up_url=None, up_method=None, up_headers=None, imagehost=None) -> None:
-    """写请求日志；任何异常都吞掉，绝不影响主流程。"""
+            up_url=None, up_method=None, up_headers=None, imagehost=None,
+            parent_log_id=None) -> int | None:
+    """写请求日志；任何异常都吞掉，绝不影响主流程。
+
+    返回新行 id（拿不到就返回 None）——素材日志要靠它把「生成时自动转换」挂回所属生成日志。
+    """
     try:
         with connect() as c:
-            c.execute(
+            cur = c.execute(
                 "INSERT INTO logs(ts,provider,model,public_path,http_status,upstream_status,ms,error,"
                 "request_json,upstream_request,response_snippet,kind,attempts,key_index,images,cost,"
-                "cost_currency,token,token_id,upstream_url,upstream_method,upstream_headers,imagehost)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "cost_currency,token,token_id,upstream_url,upstream_method,upstream_headers,imagehost,"
+                "parent_log_id)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (int(time.time()), provider, model, path, status, up_status, ms, error,
                  json.dumps(utils.compact_b64(req), ensure_ascii=False)[:8000],
                  json.dumps(utils.compact_b64(up_req), ensure_ascii=False)[:8000],
@@ -266,10 +274,12 @@ def log_row(provider, model, path, status, up_status, ms, error, req, up_req, sn
                  attempts, key_index, images, cost, cost_currency, token, token_id,
                  up_url, up_method,
                  json.dumps(up_headers, ensure_ascii=False) if up_headers else None,
-                 json.dumps(imagehost, ensure_ascii=False) if imagehost else None))
+                 json.dumps(imagehost, ensure_ascii=False) if imagehost else None,
+                 parent_log_id))
             c.execute("DELETE FROM logs WHERE id < (SELECT MAX(id) FROM logs) - 5000")
+            return cur.lastrowid
     except Exception:
-        pass
+        return None
 
 
 def get_settings(scope: str) -> dict:

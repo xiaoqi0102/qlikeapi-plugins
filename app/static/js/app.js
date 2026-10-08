@@ -13,8 +13,8 @@ const $ = UI.$, $$ = UI.$$, esc = UI.esc, fmtTime = UI.fmtTime, timeAgo = UI.tim
 const state = {plugins: [], providers: [], siteTypes: [], sites: [], tokens: [],
                trend: 'hourly', auto: true, view: 'overview',
                usage: {days: 7, dim: 'provider', metric: 'requests'},
-               logs: {page: 0, size: 50},
-               mats: {page: 0, size: 50},
+               logs: {page: 0, size: 50, source: 'all', cursor: '', stack: [], next: ''},
+               mats: {page: 0, size: 50, parent: ''},
                charts: {}};
 
 /* ---------------- 基础通讯 ---------------- */
@@ -105,8 +105,9 @@ function lineDS(label, data, color, fill = true) {
 /* ---------------- 视图路由 ---------------- */
 const TITLES = {overview:['概览','图片协议转换网关运行状态'], usage:['用量统计','请求量 / 图片张数 / 估算费用'],
   providers:['渠道实例','每个实例 = New API 里的一个上游渠道'], models:['模型目录','客户端模型名 → 上游真实名'],
-  plugins:['渠道插件','放一个 .py 到 app/channels/ 即新增渠道类型'], logs:['请求日志','含客户端请求与翻译后报文对比'],
-  jobs:['异步任务','fal 队列任务记录'], materials:['素材日志','图片 / 视频 / 音频素材 → 公网直链的完整转换过程'],
+  plugins:['渠道插件','放一个 .py 到 app/channels/ 即新增渠道类型'],
+  logs:['生成日志','图片（本网关）+ 视频（New API）统一时间轴；分类标签可筛，素材转换已拆到素材日志'],
+  jobs:['异步任务','fal 队列任务记录'], materials:['素材日志','两类分开：客户端主动上传 + 生成时自动转换（base64 ↔ 公网直链）'],
   tokens:['访问令牌','发给客户端的 API key：可限额度、限模型、限渠道、限 IP'],
   balances:['站点余额','上游站点余额（只读查询）'], settings:['设置','账号与运行信息']};
 const LOADERS = {overview:'loadOverview', usage:'loadUsage', providers:'loadProviders', models:'loadModels',
@@ -1877,41 +1878,166 @@ const act = {
     toast('已下载 PLUGIN-AUTHORING.md');
   },
 
-  /* -------------------- 请求日志 -------------------- */
-  logsSize(v) { state.logs.size = Number(v) || 50; state.logs.page = 0; act.loadLogs(); },
-  logsPage(d) { state.logs.page = Math.max(0, state.logs.page + d); act.loadLogs(); },
+  /* -------------------- 生成日志（图片 + 视频，统一时间轴） -------------------- */
+  logSource(v) {
+    state.logs.source = v || 'all';
+    state.logs.cursor = ''; state.logs.stack = []; state.logs.next = ''; state.logs.page = 0;
+    $$('[data-seg="logsrc"] button').forEach(b => b.classList.toggle('on', b.dataset.src === state.logs.source));
+    act.loadLogs();
+  },
+  logsSize(v) {
+    state.logs.size = Number(v) || 50;
+    state.logs.cursor = ''; state.logs.stack = []; state.logs.next = ''; state.logs.page = 0;
+    act.loadLogs();
+  },
+  logsNext() {
+    if (!state.logs.next) return;
+    state.logs.stack.push(state.logs.cursor || '');
+    state.logs.cursor = state.logs.next;
+    act.loadLogs();
+  },
+  logsPrev() {
+    if (!state.logs.stack.length) return;
+    state.logs.cursor = state.logs.stack.pop() || '';
+    act.loadLogs();
+  },
+  vidStatus(s) {
+    return {SUCCESS: ['ok', '成功'], FAILURE: ['err', '失败'], NOT_START: ['', '排队中'],
+            SUBMITTED: ['warn', '进行中'], IN_PROGRESS: ['warn', '进行中'],
+            QUEUED: ['', '排队中'], RUNNING: ['warn', '进行中']}[s] || ['', s || '—'];
+  },
+
+  /* 一行 = 图片（本机）或视频（New API）；字段名两边尽量对齐 */
+  logRow(l, KIND) {
+    const t = `<span class="hint">${fmtTime(l.ts)}</span>`;
+    if (l.src === 'video') {
+      const st = act.vidStatus(l.status);
+      const bad = l.status && l.status !== 'SUCCESS';
+      return [t, pill('warn', '视频'),
+        `${pill(st[0], st[1])}${l.refunded ? ' ' + pill('info', '已退款') : ''}`
+          + (bad && l.fail_reason ? `<div class="hint" title="${esc(l.fail_reason)}">${esc(String(l.fail_reason).slice(0, 22))}</div>` : ''),
+        `${esc(l.provider || '—')}<div class="hint">${esc((l.plugin && l.plugin.name) || '')} ${esc((l.plugin && l.plugin.version) || '')}</div>`,
+        `<span class="mono">${esc(l.model || '')}</span>`
+          + (l.upstream_model && l.upstream_model !== l.model ? `<div class="hint">上游 ${esc(l.upstream_model)}</div>` : ''),
+        `<span class="hint mono">${esc(l.request_path || '')}</span>`,
+        st[0] ? pill(st[0], st[1]) : `<span class="chip">${esc(st[1])}</span>`,
+        l.token ? `<span class="chip">${esc(l.token)}</span>` : '<span class="hint">内部</span>',
+        fmtMs(l.ms),
+        l.cost != null ? `<span class="mono">$${(+l.cost).toFixed(2)}</span>${l.refunded ? '<div class="hint">已退</div>' : ''}` : '<span class="hint">—</span>',
+        `<button class="btn btn-sm btn-outline-secondary" onclick="act.logDetailVideo('${esc(l.task_id)}')">详情</button>`];
+    }
+    const k = KIND[l.kind] || ['', l.kind || ''];
+    return [t, pill('info', '图片'), pill(k[0], k[1]), esc(l.provider),
+      `<span class="mono">${esc(l.model || '')}</span>`,
+      `<span class="hint mono">${esc(l.public_path || '')}</span>`,
+      l.http_status < 400 ? pill('ok', 'HTTP ' + l.http_status) : pill('err', 'HTTP ' + l.http_status),
+      l.token ? `<span class="chip">${esc(l.token)}</span>` : '<span class="hint">内部</span>',
+      fmtMs(l.ms),
+      l.cost != null ? `<span class="mono">${esc(l.cost_currency || '$')}${(+l.cost).toFixed(2)}</span>` : '<span class="hint">—</span>',
+      `<button class="btn btn-sm btn-outline-secondary" onclick="act.logDetail(${String(l.id).replace(/^i/, '')})">详情</button>`];
+  },
 
   async loadLogs() {
-    const size = state.logs.size, off = state.logs.page * size;
-    const q = new URLSearchParams({limit: size, offset: off, provider: $('#logProvider').value, status: $('#logStatus').value,
-      q: $('#logQ').value, kind: $('#logKind').value, token: ($('#logToken') || {}).value || ''});
+    const size = state.logs.size, src = state.logs.source;
+    const el = (id) => (($(id) || {}).value) || '';
+    const q = new URLSearchParams({source: src, limit: size, cursor: state.logs.cursor || '',
+      status: el('#logStatus'), q: el('#logQ'), token: el('#logToken'), days: el('#logDays') || 30,
+      kind: src === 'video' ? '' : el('#logKind'),
+      provider: src === 'video' ? '' : el('#logProvider'),
+      channel: src === 'image' ? '' : el('#logChannel'),
+      model: el('#logModel')});
     $('#logs').innerHTML = skelTable(11, 8);
-    const r = await api('/api/logs?' + q);
+    const r = await api('/api/genlogs?' + q);
     if (!r) return;
-    const KIND = {relay:['info','转发'], client:['warn','本地校验'], probe:['','探活']};
-    $('#logs').innerHTML = r.data.length ? table(
-      ['时间','类型','渠道','模型','路径','状态','令牌','耗时','尝试','密钥','操作'],
-      r.data.map(l => [`<span class="hint">${fmtTime(l.ts)}</span>`,
-        (() => { const k = KIND[l.kind] || ['', l.kind || '']; return pill(k[0], k[1]); })(),
-        esc(l.provider), `<span class="mono">${esc(l.model||'')}</span>`,
-        `<span class="hint mono">${esc(l.public_path||'')}</span>`,
-        l.http_status < 400 ? pill('ok', l.http_status) : pill('err', l.http_status),
-        l.token ? `<span class="chip">${esc(l.token)}</span>` : '<span class="hint">内部</span>',
-        `<span class="mono">${l.upstream_status ?? '—'}</span>`, fmtMs(l.ms),
-        `<span class="hint">${l.attempts ?? '—'}</span>`,
-        `<span class="hint">${l.key_index == null ? '—' : '#' + l.key_index}</span>`,
-        `<button class="btn btn-sm btn-outline-secondary" onclick="act.logDetail(${l.id})">详情</button>`]),
+    const res = (r.data && r.data.data) ? r.data : {data: []};   // 载荷：{data, next_cursor, counts, video}
+    const rows = res.data || [];
+    state.logs.next = rows.length >= size ? (res.next_cursor || '') : '';
+    const KIND = {relay: ['info', '转发'], router: ['info', '路由'], client: ['warn', '本地校验'], probe: ['', '探活']};
+    const head = {all: '图片 + 视频（统一时间轴）', image: '图片（本网关）', video: '视频（New API 任务型）'}[src] || '';
+    let note = '';
+    if (res.video && res.video.available === false) {
+      note = `<div class="hint mb-2"><i class="ti ti-plug-connected-x"></i> 视频数据源未接通：${esc(res.video.note || '')}（图片日志不受影响）</div>`;
+    } else if (src !== 'image') {
+      note = `<div class="hint mb-2"><i class="ti ti-video"></i> 视频行只读直连 New API 库：含客户端请求快照、上游模型、计费与退款；`
+        + `参考图转换明细在 <a href="javascript:void(0)" onclick="act.goMaterial()">素材日志</a>。</div>`;
+    }
+    if (state.mats.parent) state.mats.parent = '';   // 从日志跳素材后回到这里，清掉那次筛选
+    $('#logs').innerHTML = note + (rows.length ? table(
+      ['时间', '分类', '类型', '渠道 / 插件', '模型', '路径', '状态', '令牌', '耗时', '费用', '操作'],
+      rows.map(l => act.logRow(l, KIND)),
       {hcls: [null, null, null, null, null, null, null, null, null, null, 'ops-cell'],
        ccls: [null, null, null, null, null, null, null, null, null, null, 'ops-cell']})
-      : emptyBox(state.logs.page ? '这一页没有日志了，试试上一页' : '没有匹配的日志', 'ti-notebook');
+      : emptyBox('没有匹配的记录', 'ti-notebook'));
     $('#logs').innerHTML += `<div class="pager">
-      <span class="hint">第 <b>${state.logs.page + 1}</b> 页 · 本页 ${r.data.length} 条${off ? ` · 跳过前 ${off} 条` : ''}</span>
+      <span class="hint">${esc(head)} · 本页 ${rows.length} 条（图片 <b>${res.counts ? res.counts.image : 0}</b> / 视频 <b>${res.counts ? res.counts.video : 0}</b>）</span>
       <span class="spacer"></span>
       <select class="form-select form-select-sm" style="width:96px" onchange="act.logsSize(this.value)">
         ${[20, 50, 100, 200].map(n => `<option value="${n}" ${size === n ? 'selected' : ''}>${n} 条/页</option>`).join('')}</select>
-      <button class="btn btn-sm btn-outline-secondary" ${state.logs.page ? '' : 'disabled'} onclick="act.logsPage(-1)"><i class="ti ti-chevron-left"></i> 上一页</button>
-      <button class="btn btn-sm btn-outline-secondary" ${r.data.length < size ? 'disabled' : ''} onclick="act.logsPage(1)">下一页 <i class="ti ti-chevron-right"></i></button>
+      <button class="btn btn-sm btn-outline-secondary" ${state.logs.stack.length ? '' : 'disabled'} onclick="act.logsPrev()"><i class="ti ti-chevron-left"></i> 上一页</button>
+      <button class="btn btn-sm btn-outline-secondary" ${state.logs.next ? '' : 'disabled'} onclick="act.logsNext()">下一页 <i class="ti ti-chevron-right"></i></button>
     </div>`;
+  },
+
+  /* 生成日志 → 素材日志（带 parent 筛选，只看这一次生成里的转换） */
+  goMaterial(parentId) {
+    state.mats.parent = parentId ? String(parentId) : '';
+    state.mats.page = 0;
+    if ((location.hash.slice(1) || 'overview') === 'materials') act.loadMaterials();
+    else location.hash = '#materials';
+  },
+
+  /* 视频生成详情：客户端请求快照 + 上游信息 + 结果 + 计费（对比图片日志 #466 的排面） */
+  async logDetailVideo(taskId) {
+    const r = await api('/api/genlogs/video/' + encodeURIComponent(taskId));
+    if (!r) return;
+    const l = (r.data && r.data.data) || {}, d = l.client_request || {}, up = l.upstream_request || {};
+    const BS = String.fromCharCode(92);
+    const qt = (s) => "'" + String(s == null ? '' : s).replace(/'/g, "'" + BS + BS + "'") + "'";
+    const st = act.vidStatus(l.status);
+    const submit = Object.assign({}, d);
+    const cliCurl = ['curl ' + qt(location.origin + (l.request_path || '/v1/videos')) + ' ' + BS,
+      '  --request POST ' + BS,
+      '  --header ' + qt('Authorization: Bearer YOUR_QLIKE_TOKEN') + ' ' + BS,
+      '  --header ' + qt('Content-Type: application/json') + ' ' + BS,
+      '  --data ' + qt(JSON.stringify(submit, null, 2))].join('\n');
+    const queryCurl = ['curl ' + qt(location.origin + '/v1/videos/' + l.task_id) + ' ' + BS,
+      '  --header ' + qt('Authorization: Bearer YOUR_QLIKE_TOKEN')].join('\n');
+    const refs = (l.reference_images || []).map(u =>
+      `<a class="mono" href="${esc(u)}" target="_blank" rel="noopener">${esc(String(u).slice(0, 78))}</a>`).join('<br>')
+      || '<span class="hint">（无参考图）</span>';
+    const results = (l.result_urls || []).map(u =>
+      `<a class="mono" href="${esc(u)}" target="_blank" rel="noopener">${esc(String(u).slice(0, 78))}</a>`).join('<br>')
+      || '<span class="hint">（还没有结果 / 失败无结果）</span>';
+    const box = (id, title, txt) => `
+      <div class="curl-head mb-1"><label class="form-label mb-0">${title}</label>
+        <div class="acts"><button class="btn btn-sm btn-outline-secondary" onclick="act.matCopy('${id}','已复制')"><i class="ti ti-clipboard"></i> 复制</button></div></div>
+      <pre class="json mb-3" id="${id}">${esc(txt)}</pre>`;
+    modal('视频生成 · ' + esc(l.task_id), `
+      <div class="row mb-3">
+        ${pill('warn', '视频')} ${pill(st[0], st[1])}
+        ${l.refunded ? pill('info', '已退款') : ''}
+        ${l.provider ? pill('info', l.provider) : ''}
+        <span class="chip mono">${esc(l.model || '')}</span>
+        ${l.upstream_model ? `<span class="chip mono">上游 ${esc(l.upstream_model)}</span>` : ''}
+        ${(l.plugin && l.plugin.name) ? `<span class="chip">${esc(l.plugin.name)} ${esc(l.plugin.version || '')}</span>` : ''}
+        ${pill('', fmtMs(l.ms))}
+        ${l.cost != null ? `<span class="chip mono">$${(+l.cost).toFixed(2)}/次</span>` : ''}
+        ${l.token ? `<span class="chip">${esc(l.token)}</span>` : '<span class="hint">内部</span>'}
+        ${l.username ? `<span class="hint">用户 ${esc(l.username)}</span>` : ''}
+      </div>
+      ${l.fail_reason ? `<label class="form-label">失败原因</label><pre class="json mb-3">${esc(l.fail_reason)}</pre>` : ''}
+      <div class="hint mb-3"><i class="ti ti-info-circle"></i> 视频不经过本网关（客户端 → New API → 任务插件 → 上游）。
+        下面是 New API 任务表里<b>插件写入的请求快照</b>、上游侧信息与计费（面板只读直连库取数）。</div>
+      <label class="form-label">① 客户端请求（New API 入库快照）</label>
+      <pre class="json mb-3">${esc(JSON.stringify(d, null, 2))}</pre>
+      ${box('vidCli', '② 还原成可执行 curl（提交同一个任务）', cliCurl)}
+      ${box('vidQuery', '③ 查询任务状态', queryCurl)}
+      <label class="form-label">参考图</label><div class="mb-3">${refs}</div>
+      <label class="form-label">④ 上游信息（插件提交时回执）</label>
+      <pre class="json mb-3">${esc(JSON.stringify(up, null, 2))}</pre>
+      <label class="form-label">⑤ 结果直链</label><div class="mb-3">${results}</div>
+      <label class="form-label">⑥ 计费（New API）</label>
+      <pre class="json">${esc(JSON.stringify(l.billing || {}, null, 2))}</pre>`);
   },
 
   imagehostNote(raw) {
@@ -1991,6 +2117,9 @@ const act = {
       ${l.error ? `<label class="form-label">错误</label><pre class="json mb-3">${esc(l.error)}</pre>` : ''}
       ${act.refNote(l.imagehost, l.request_json, l.upstream_request) ? `<div class="hint mb-3"><i class="ti ti-arrows-exchange"></i>
         ${act.imagehostNote(l.imagehost) ? '参考图转换' : '参考图'}：${act.refNote(l.imagehost, l.request_json, l.upstream_request)}</div>` : ''}
+      ${act.imagehostNote(l.imagehost) ? `<div class="hint mb-3"><i class="ti ti-cloud-upload"></i>
+        这次生成里的素材转换已归到素材日志：
+        <a href="javascript:void(0)" onclick="closeModal();act.goMaterial(${l.id})">看转换明细 →</a></div>` : ''}
       ${curlBox('cli', '① 完整请求 · 客户端 → 本网关', cliRead, cliStrict)}
       ${curlBox('up', '② 完整请求 · 本网关 → 上游', upRead, upStrict)}
       <div class="hint mb-3">① 是客户端发来的入口形态（凭据已换成 YOUR_QLIKE_TOKEN）；② 是翻译后真正发给上游的报文
@@ -2008,8 +2137,15 @@ const act = {
   matKindLabel(k) { return {image: '图片', video: '视频', audio: '音频', file: '其它'}[k] || (k || '—'); },
   matSourceLabel(s) {
     return {multipart: '文件上传', value: 'base64 / data URI', bytes: '裸字节',
-            url: '链接透传', selfcheck: '面板自检'}[s] || (s || '—');
+            url: '链接透传', selfcheck: '面板自检', auto: '生成时自动转换'}[s] || (s || '—');
   },
+  /* 来源大类：客户端主动上传 vs 生成时自动转换（用户要求两类分开） */
+  matOrigin(t) {
+    if (t.mode === 'convert') return ['auto', '生成时自动转换'];
+    if (t.source === 'selfcheck') return ['', '面板自检'];
+    return ['up', '客户端上传'];
+  },
+  matSource() { state.mats.page = 0; state.mats.parent = ''; act.loadMaterials(); },
 
   /* 客户端怎么接（页面顶部那张说明卡，只画一次） */
   matHowto() {
@@ -2032,19 +2168,26 @@ const act = {
 
   async loadMaterials() {
     const size = state.mats.size, off = state.mats.page * size;
-    const q = new URLSearchParams({limit: size, offset: off, kind: 'upload',
-      status: $('#matStatus').value, q: $('#matQ').value,
+    const srcFilter = ($('#matSource') || {}).value || '';
+    const q = new URLSearchParams({limit: size, offset: off,
+      kinds: srcFilter === 'upload' ? 'upload' : (srcFilter === 'convert' ? 'convert' : 'upload,convert'),
+      status: $('#matStatus').value, q: $('#matQ').value, days: 0,
+      parent: state.mats.parent || '',
       token: ($('#matToken') || {}).value || ''});
     $('#materials').innerHTML = skelTable(10, 8);
     const r = await api('/api/logs?' + q);
     if (!r) return;
     let rows = r.data || [];
+    if (!Array.isArray(rows)) rows = (rows && rows.data) || [];
     act.matHowto();
     act.matFill(rows);
+    const pin = state.mats.parent
+      ? `<div class="hint mb-2"><i class="ti ti-filter"></i> 只看生成日志 <b>#${esc(state.mats.parent)}</b> 那次请求的转换
+          <a href="javascript:void(0)" onclick="act.goMaterial()">清除筛选</a></div>` : '';
     const wantKind = $('#matKind').value, wantHost = $('#matHost').value;
     if (wantKind) rows = rows.filter(l => (act.matTrace(l).kind_of || '') === wantKind);
     if (wantHost) rows = rows.filter(l => (act.matTrace(l).host || '') === wantHost);
-    $('#materials').innerHTML = rows.length ? table(
+    $('#materials').innerHTML = pin + (rows.length ? table(
       ['时间', '类型', '素材', '大小', '来源', '站点', '状态', '直链', '令牌', '操作'],
       rows.map(l => {
         const t = act.matTrace(l);
@@ -2052,9 +2195,14 @@ const act = {
         const link = t.url ? `<a class="mono" href="${esc(t.url)}" target="_blank" rel="noopener">${esc(String(t.url).slice(0, 46))}…</a>` : '<span class="hint">—</span>';
         return [`<span class="hint">${fmtTime(l.ts)}</span>`,
           `<span class="chip">${act.matKindLabel(t.kind_of)}</span>`,
-          `<span class="mono">${esc(t.filename || '—')}</span><div class="hint">${esc(t.mime || '')}</div>`,
+          t.mode === 'convert'
+            ? `<span class="mono">${esc(t.filename || '参考图')}</span><div class="hint">${esc(t.direction || '')}</div>`
+            : `<span class="mono">${esc(t.filename || '—')}</span><div class="hint">${esc(t.mime || '')}</div>`,
           kb,
-          `<span class="hint">${act.matSourceLabel(t.source)}</span>`,
+          (() => { const o = act.matOrigin(t);
+            return `<span class="chip">${esc(o[1])}</span>`
+              + (o[0] === 'auto' ? `<div class="hint">${esc(t.direction || '')}</div>`
+                                 : `<div class="hint">${esc(act.matSourceLabel(t.source))}</div>`); })(),
           t.host === 'passthrough' ? '<span class="chip">原样透传</span>' : `<span class="chip">${esc(t.host_label || t.host || '—')}</span>`,
           l.http_status < 400 ? pill('ok', l.http_status) : pill('err', l.http_status),
           link,
@@ -2063,7 +2211,7 @@ const act = {
       }),
       {hcls: [null, null, null, null, null, null, null, null, null, 'ops-cell'],
        ccls: [null, null, null, null, null, null, null, null, null, 'ops-cell']})
-      : emptyBox(state.mats.page ? '这一页没有素材记录了，试试上一页' : '还没有素材中转记录（客户端调 /v1/files 后就会出现）', 'ti-cloud-upload');
+      : emptyBox(state.mats.page ? '这一页没有素材记录了，试试上一页' : '还没有素材记录（客户端调 /v1/files，或生成时自动转换）', 'ti-cloud-upload'));
     $('#materials').innerHTML += `<div class="pager">
       <span class="hint">第 <b>${state.mats.page + 1}</b> 页 · 本页 ${rows.length} 条${off ? ` · 跳过前 ${off} 条` : ''}</span>
       <span class="spacer"></span>
@@ -2092,10 +2240,47 @@ const act = {
         tsel.dataset.filled = '1';
         const cur = tsel.value;
         tsel.innerHTML = '<option value="">全部令牌</option><option value="0">内部（无令牌）</option>'
-          + (r.data || []).map(t => `<option value="${t.id}">${esc(t.name || ('令牌#' + t.id))}</option>`).join('');
+          + ((r.data.items || r.data) || []).map(t => `<option value="${t.id}">${esc(t.name || ('令牌#' + t.id))}</option>`).join('');
         tsel.value = cur;
       });
     }
+  },
+
+  /* 生成时自动转换的明细（图片生成的参考图 base64 ↔ 直链） */
+  matDetailConvert(l, t) {
+    const items = t.items || [];
+    const rows = items.map((n, i) => {
+      if (n.mode === 'inline') {
+        return [`<span class="hint">${i + 1}</span>`, pill('info', 'URL → 内联 base64'),
+          `<span class="mono">${esc(String(n.from || '').slice(0, 64))}</span>`,
+          n.bytes ? fmtBytes(n.bytes) : '—', '<span class="hint">—</span>'];
+      }
+      if (n.host) {
+        return [`<span class="hint">${i + 1}</span>`, pill('ok', 'base64 → 公网直链'),
+          `<span class="chip">${esc(n.host)}</span>`, n.bytes ? fmtBytes(n.bytes) : '—',
+          n.url ? `<a class="mono" href="${esc(n.url)}" target="_blank" rel="noopener">${esc(String(n.url).slice(0, 64))}</a>` : '—'];
+      }
+      return [`<span class="hint">${i + 1}</span>`, pill('err', '转换失败 / 已按原样转发'),
+        `<span class="hint">${esc((n.warnings || []).join('；'))}</span>`, '—', '—'];
+    });
+    modal('素材转换 · 生成时自动 · #' + l.id, `
+      <div class="row mb-3">
+        ${l.http_status < 400 ? pill('ok', 'HTTP ' + l.http_status) : pill('err', 'HTTP ' + l.http_status)}
+        <span class="chip">生成时自动转换</span>
+        <span class="chip mono">${esc(t.direction || '')}</span>
+        ${t.count ? `<span class="chip">${t.count} 张</span>` : ''}
+        ${t.bytes ? `<span class="chip mono">${fmtBytes(t.bytes)}</span>` : ''}
+        ${l.provider ? pill('info', l.provider) : ''}
+        ${l.model ? `<span class="chip mono">${esc(l.model)}</span>` : ''}
+      </div>
+      <div class="hint mb-3"><i class="ti ti-arrows-exchange"></i> 这是<b>图片生成时</b>网关自动做的参考图形态转换
+        （客户端给 base64、渠道只认 URL → 转公网直链；渠道只认 base64 → 下载内联）。生成日志里只留一个入口，明细在这里。
+        ${t.parent_log_id ? `<a href="javascript:void(0)" onclick="closeModal();act.logDetail(${t.parent_log_id})">回到生成日志 #${t.parent_log_id} →</a>` : ''}</div>
+      ${rows.length ? table(['#', '方向', '来源 / 站点', '大小', '结果直链'], rows,
+        {hcls: [null, null, null, null, null], ccls: [null, null, null, null, null]})
+        : '<div class="hint">（无明细）</div>'}
+      <label class="form-label mt-3">原始明细（JSON）</label>
+      <pre class="json">${esc(JSON.stringify(t, null, 2))}</pre>`);
   },
 
   matCopy(id, msg) {
@@ -2108,6 +2293,7 @@ const act = {
     const r = await api('/api/logs/' + id);
     if (!r) return;
     const l = r.data, t = act.matTrace(l);
+    if (t.mode === 'convert') return act.matDetailConvert(l, t);
     const BS = String.fromCharCode(92);
     const parse = (x) => { try { return JSON.parse(x); } catch (e) { return null; } };
     const jsonTxt = (x) => { try { return JSON.stringify(JSON.parse(x), null, 2); } catch (e) { return x || '（空）'; } };
