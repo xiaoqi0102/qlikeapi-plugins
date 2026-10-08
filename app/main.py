@@ -11,7 +11,7 @@ qlikeapi-plugins v3 —— 图片协议转换网关（挂在 New API 后面当�
   protocols.py     协议实现（gemini_native / openai_images / qiniu_fal 队列）
   channels/        ★ 渠道插件目录：放一个 .py 就是一个新渠道类型，Web 上点「重载插件」即时生效
   relay.py         /up/<渠道>/v1/images/{generations,edits} 转发（含 key 轮换）
-  media.py         /v1/files 素材上传中转：base64/data URI/文件 → 图床公网直链
+  media.py         /v1/files 素材上传中转：base64/data URI/文件 → 公网直链（图片/视频/音频）
   admin.py         控制台 API：账号密码登录、渠道管理、插件重载、日志、探活
   static/          控制台页面
 
@@ -26,14 +26,15 @@ import json
 import os
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse, PlainTextResponse,
+                               RedirectResponse)
 
 from . import admin, channels, media, relay, store
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 
-app = FastAPI(title="qlikeapi-plugins", version = "3.18.0")
+app = FastAPI(title="qlikeapi-plugins", version = "3.19.0")
 app.include_router(relay.router, prefix="/up", tags=["upstream"])
 app.include_router(relay.router_v1, prefix="/v1", tags=["router"])   # 统一入口：New API 只挂这一个渠道
 app.include_router(media.router, prefix="/v1", tags=["media"])       # 素材上传中转：base64/文件 → 公网直链
@@ -89,6 +90,31 @@ def ui_kit_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     with open(os.path.join(STATIC_DIR, "ui-kit.html"), encoding="utf-8") as f:
         return HTMLResponse(f.read())
+
+
+# ------------------------------------------------------------------ 接口文档（公开，无需登录）
+
+DOCS_DIR = os.path.join(os.path.dirname(APP_DIR), "docs")
+DOCS_MD = os.path.join(DOCS_DIR, "api-docs.md")
+
+
+@app.get("/api-docs", response_class=HTMLResponse)
+def api_docs_page():
+    """在线接口文档页（页面内渲染 docs/api-docs.md）。公开访问，与 aicost 的 /api-docs 一样。"""
+    with open(os.path.join(STATIC_DIR, "docs.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/api-docs.md")
+def api_docs_md(download: int = 0):
+    """接口文档 Markdown 源文件；?download=1 触发浏览器下载而不是在线打开。"""
+    if not os.path.isfile(DOCS_MD):
+        return JSONResponse({"error": {"message": "文档文件缺失"}}, status_code=404)
+    headers = {"Cache-Control": "no-cache"}
+    if download:
+        headers["Content-Disposition"] = 'attachment; filename="qlike-api-docs.md"'
+    with open(DOCS_MD, encoding="utf-8") as f:
+        return PlainTextResponse(f.read(), media_type="text/markdown; charset=utf-8", headers=headers)
 
 
 @app.get("/static/{path:path}")

@@ -5,6 +5,8 @@ WORKDIR /
 
 # 整包复制（app/ 是一个包：main.py + protocols.py + relay.py + admin.py + store.py + channels/ + static/）
 COPY app /app
+# 接口文档：/api-docs 在线页 + /api-docs.md 下载（main.py 从 /docs 读）
+COPY docs /docs
 RUN pip install -r /app/requirements.txt
 
 EXPOSE 18673

@@ -30,6 +30,7 @@
       <a class="item" href="#tokens" data-v="tokens"><i class="ti ti-key"></i>访问令牌</a>
       <a class="item" href="#plugins" data-v="plugins"><i class="ti ti-puzzle"></i>渠道插件</a>
       <a class="item" href="#logs" data-v="logs"><i class="ti ti-notebook"></i>请求日志</a>
+      <a class="item" href="#materials" data-v="materials"><i class="ti ti-cloud-upload"></i>素材日志</a>
       <a class="item" href="#jobs" data-v="jobs"><i class="ti ti-hourglass"></i>异步任务</a>
       <a class="item" href="#balances" data-v="balances"><i class="ti ti-wallet"></i>站点余额</a>
       <div class="sep">系统</div>
@@ -211,12 +212,41 @@
             <select class="form-select form-select-sm" id="logKind" style="width:150px" onchange="act.loadLogs()">
               <option value="">全部类型</option><option value="relay">转发</option>
               <option value="client">本地校验</option><option value="probe">探活</option>
+              <option value="upload">素材中转</option>
             </select>
             <input class="form-control form-control-sm" id="logQ" placeholder="搜索模型 / 错误 / 路径" style="width:200px" onkeydown="if(event.key==='Enter')act.loadLogs()">
             <button class="btn btn-sm btn-outline-secondary" onclick="act.loadLogs()"><i class="ti ti-search"></i> 查询</button>
           </div>
         </header>
         <div class="body tight" id="logs"></div>
+      </div>
+    </section>
+
+    <!-- ================= 素材日志 ================= -->
+    <section id="v-materials" hidden>
+      <div class="panel">
+        <header>
+          <h3><i class="ti ti-cloud-upload"></i>素材中转日志 <span class="hint">图片 / 视频 / 音频 → 公网直链的完整转换过程</span></h3>
+          <div class="acts">
+            <select class="form-select form-select-sm" id="matKind" style="width:130px" onchange="act.loadMaterials()">
+              <option value="">全部类型</option><option value="image">图片</option>
+              <option value="video">视频</option><option value="audio">音频</option>
+            </select>
+            <select class="form-select form-select-sm" id="matHost" style="width:170px" onchange="act.loadMaterials()"><option value="">全部站点</option></select>
+            <select class="form-select form-select-sm" id="matStatus" style="width:130px" onchange="act.loadMaterials()">
+              <option value="">全部状态</option><option value="ok">成功</option><option value="err">失败</option>
+            </select>
+            <select class="form-select form-select-sm" id="matToken" style="width:150px" onchange="act.loadMaterials()"><option value="">全部令牌</option></select>
+            <input class="form-control form-control-sm" id="matQ" placeholder="搜索文件名 / 直链 / 错误" style="width:200px" onkeydown="if(event.key==='Enter')act.loadMaterials()">
+            <button class="btn btn-sm btn-outline-secondary" onclick="act.loadMaterials()"><i class="ti ti-search"></i> 查询</button>
+          </div>
+        </header>
+        <div class="body tight" id="materials"></div>
+      </div>
+
+      <div class="panel" style="box-shadow:none;border-style:dashed">
+        <header style="border-bottom:0;padding-bottom:4px"><h3><i class="ti ti-plug-connected"></i>客户端怎么接</h3></header>
+        <div class="body" id="matHowto"></div>
       </div>
     </section>
 
@@ -276,6 +306,14 @@
           <span class="hint" id="ihState"></span>
         </header>
         <div class="body" id="ihBox"><div class="hint">加载中…</div></div>
+      </div>
+
+      <div class="panel">
+        <header>
+          <h3><i class="ti ti-cloud-upload"></i>素材中转（图片 / 视频 / 音频 → 公网直链）</h3>
+          <span class="hint" id="matState"></span>
+        </header>
+        <div class="body" id="matBox"><div class="hint">加载中…</div></div>
       </div>
 
       <div class="grid2">

@@ -14,6 +14,7 @@ const state = {plugins: [], providers: [], siteTypes: [], sites: [], tokens: [],
                trend: 'hourly', auto: true, view: 'overview',
                usage: {days: 7, dim: 'provider', metric: 'requests'},
                logs: {page: 0, size: 50},
+               mats: {page: 0, size: 50},
                charts: {}};
 
 /* ---------------- 基础通讯 ---------------- */
@@ -105,11 +106,11 @@ function lineDS(label, data, color, fill = true) {
 const TITLES = {overview:['概览','图片协议转换网关运行状态'], usage:['用量统计','请求量 / 图片张数 / 估算费用'],
   providers:['渠道实例','每个实例 = New API 里的一个上游渠道'], models:['模型目录','客户端模型名 → 上游真实名'],
   plugins:['渠道插件','放一个 .py 到 app/channels/ 即新增渠道类型'], logs:['请求日志','含客户端请求与翻译后报文对比'],
-  jobs:['异步任务','fal 队列任务记录'],
+  jobs:['异步任务','fal 队列任务记录'], materials:['素材日志','图片 / 视频 / 音频素材 → 公网直链的完整转换过程'],
   tokens:['访问令牌','发给客户端的 API key：可限额度、限模型、限渠道、限 IP'],
   balances:['站点余额','上游站点余额（只读查询）'], settings:['设置','账号与运行信息']};
 const LOADERS = {overview:'loadOverview', usage:'loadUsage', providers:'loadProviders', models:'loadModels',
-  plugins:'loadPlugins', logs:'loadLogs', jobs:'loadJobs', balances:'loadBalances', tokens:'loadTokens',
+  plugins:'loadPlugins', logs:'loadLogs', materials:'loadMaterials', jobs:'loadJobs', balances:'loadBalances', tokens:'loadTokens',
   settings:'loadSettings'};
 
 function show(view) {
@@ -1999,6 +2000,315 @@ const act = {
       <label class="form-label">响应片段</label><pre class="json">${esc(jsonTxt(l.response_snippet, false))}</pre>`);
   },
 
+  /* -------------------- 素材日志（图片 / 视频 / 音频 → 公网直链） -------------------- */
+  matsSize(v) { state.mats.size = Number(v) || 50; state.mats.page = 0; act.loadMaterials(); },
+  matsPage(d) { state.mats.page = Math.max(0, state.mats.page + d); act.loadMaterials(); },
+
+  matTrace(l) { try { return JSON.parse(l.imagehost || '{}') || {}; } catch (e) { return {}; } },
+  matKindLabel(k) { return {image: '图片', video: '视频', audio: '音频', file: '其它'}[k] || (k || '—'); },
+  matSourceLabel(s) {
+    return {multipart: '文件上传', value: 'base64 / data URI', bytes: '裸字节',
+            url: '链接透传', selfcheck: '面板自检'}[s] || (s || '—');
+  },
+
+  /* 客户端怎么接（页面顶部那张说明卡，只画一次） */
+  matHowto() {
+    const box = $('#matHowto');
+    if (!box || box.dataset.done) return;
+    box.dataset.done = '1';
+    const url = location.origin + '/v1/files';
+    box.innerHTML = `
+      <p class="hint mb-2">客户端（作图 / 视频工具，如 盐值AI）在「<b>参考素材中转 → 自定义上传接口</b>」填下面这个地址，
+        本地文件与 Base64 会被自动转成公网直链；也可以自己先调它拿直链，再填进视频任务的素材字段。</p>
+      <div class="curl-head mb-1">
+        <label class="form-label mb-0">素材上传接口（POST）</label>
+        <div class="acts"><button class="btn btn-sm btn-outline-secondary" onclick="copyText('${url}','地址已复制')"><i class="ti ti-clipboard"></i> 复制地址</button></div>
+      </div>
+      <pre class="json mb-2">${esc(url)}</pre>
+      <div class="hint mb-0">鉴权 <span class="mono">Authorization: Bearer &lt;令牌&gt;</span>（也支持 <span class="mono">?token=</span>）；
+        指定落地站点加 <span class="mono">?target=sudashui|jiasu|imgbb|uguu</span>；只回纯文本直链加 <span class="mono">?format=text</span>；
+        细节与限额见 <a href="/api-docs" target="_blank" rel="noopener">接口文档 §8</a>。</div>`;
+  },
+
+  async loadMaterials() {
+    const size = state.mats.size, off = state.mats.page * size;
+    const q = new URLSearchParams({limit: size, offset: off, kind: 'upload',
+      status: $('#matStatus').value, q: $('#matQ').value,
+      token: ($('#matToken') || {}).value || ''});
+    $('#materials').innerHTML = skelTable(10, 8);
+    const r = await api('/api/logs?' + q);
+    if (!r) return;
+    let rows = r.data || [];
+    act.matHowto();
+    act.matFill(rows);
+    const wantKind = $('#matKind').value, wantHost = $('#matHost').value;
+    if (wantKind) rows = rows.filter(l => (act.matTrace(l).kind_of || '') === wantKind);
+    if (wantHost) rows = rows.filter(l => (act.matTrace(l).host || '') === wantHost);
+    $('#materials').innerHTML = rows.length ? table(
+      ['时间', '类型', '素材', '大小', '来源', '站点', '状态', '直链', '令牌', '操作'],
+      rows.map(l => {
+        const t = act.matTrace(l);
+        const kb = t.bytes ? fmtBytes(t.bytes) : (t.passthrough ? '<span class="hint">未转存</span>' : '—');
+        const link = t.url ? `<a class="mono" href="${esc(t.url)}" target="_blank" rel="noopener">${esc(String(t.url).slice(0, 46))}…</a>` : '<span class="hint">—</span>';
+        return [`<span class="hint">${fmtTime(l.ts)}</span>`,
+          `<span class="chip">${act.matKindLabel(t.kind_of)}</span>`,
+          `<span class="mono">${esc(t.filename || '—')}</span><div class="hint">${esc(t.mime || '')}</div>`,
+          kb,
+          `<span class="hint">${act.matSourceLabel(t.source)}</span>`,
+          t.host === 'passthrough' ? '<span class="chip">原样透传</span>' : `<span class="chip">${esc(t.host_label || t.host || '—')}</span>`,
+          l.http_status < 400 ? pill('ok', l.http_status) : pill('err', l.http_status),
+          link,
+          l.token ? `<span class="chip">${esc(l.token)}</span>` : '<span class="hint">内部</span>',
+          `<button class="btn btn-sm btn-outline-secondary" onclick="act.matDetail(${l.id})">详情</button>`];
+      }),
+      {hcls: [null, null, null, null, null, null, null, null, null, 'ops-cell'],
+       ccls: [null, null, null, null, null, null, null, null, null, 'ops-cell']})
+      : emptyBox(state.mats.page ? '这一页没有素材记录了，试试上一页' : '还没有素材中转记录（客户端调 /v1/files 后就会出现）', 'ti-cloud-upload');
+    $('#materials').innerHTML += `<div class="pager">
+      <span class="hint">第 <b>${state.mats.page + 1}</b> 页 · 本页 ${rows.length} 条${off ? ` · 跳过前 ${off} 条` : ''}</span>
+      <span class="spacer"></span>
+      <select class="form-select form-select-sm" style="width:96px" onchange="act.matsSize(this.value)">
+        ${[20, 50, 100, 200].map(n => `<option value="${n}" ${size === n ? 'selected' : ''}>${n} 条/页</option>`).join('')}</select>
+      <button class="btn btn-sm btn-outline-secondary" ${state.mats.page ? '' : 'disabled'} onclick="act.matsPage(-1)"><i class="ti ti-chevron-left"></i> 上一页</button>
+      <button class="btn btn-sm btn-outline-secondary" ${rows.length < size ? 'disabled' : ''} onclick="act.matsPage(1)">下一页 <i class="ti ti-chevron-right"></i></button>
+    </div>`;
+  },
+
+  /* 用本页数据把「站点 / 令牌」下拉补全（保持用户已选项） */
+  matFill(rows) {
+    const hosts = {}, toks = {};
+    rows.forEach(l => { const t = act.matTrace(l); if (t.host) hosts[t.host] = t.host_label || t.host; if (l.token) toks[l.token] = 1; });
+    const sel = $('#matHost');
+    if (sel) {
+      const cur = sel.value;
+      const opts = Object.keys(hosts).map(k => `<option value="${esc(k)}">${esc(hosts[k])}</option>`).join('');
+      sel.innerHTML = '<option value="">全部站点</option>' + opts;
+      if (hosts[cur]) sel.value = cur;
+    }
+    const tsel = $('#matToken');
+    if (tsel && !tsel.dataset.filled) {
+      api('/api/tokens').then(r => {
+        if (!r || !r.data) return;
+        tsel.dataset.filled = '1';
+        const cur = tsel.value;
+        tsel.innerHTML = '<option value="">全部令牌</option><option value="0">内部（无令牌）</option>'
+          + (r.data || []).map(t => `<option value="${t.id}">${esc(t.name || ('令牌#' + t.id))}</option>`).join('');
+        tsel.value = cur;
+      });
+    }
+  },
+
+  matCopy(id, msg) {
+    const el = document.getElementById(id);
+    if (el) copyText(el.textContent, msg || '已复制');
+  },
+
+  /* 素材转换详情：完整还原「客户端 → 网关 → 站点」的转换过程 */
+  async matDetail(id) {
+    const r = await api('/api/logs/' + id);
+    if (!r) return;
+    const l = r.data, t = act.matTrace(l);
+    const BS = String.fromCharCode(92);
+    const parse = (x) => { try { return JSON.parse(x); } catch (e) { return null; } };
+    const jsonTxt = (x) => { try { return JSON.stringify(JSON.parse(x), null, 2); } catch (e) { return x || '（空）'; } };
+    const qt = (s) => "'" + String(s == null ? '' : s).replace(/'/g, "'" + BS + BS + "'") + "'";
+    const mime = t.mime || 'application/octet-stream';
+    const fname = t.filename || '素材';
+    const qs = (t.target && t.target !== 'auto') ? '?target=' + encodeURIComponent(t.target) : '';
+    const endpoint = location.origin + '/v1/files' + qs;
+    const req = parse(l.request_json) || {};
+    // ① 客户端 → 网关：文件上传写法（最常用）
+    const cliForm = ['curl ' + qt(endpoint) + ' ' + BS, '  --request POST ' + BS,
+      '  --header ' + qt('Authorization: Bearer YOUR_QLIKE_TOKEN') + ' ' + BS,
+      '  --form ' + qt('file=@' + fname + ';type=' + mime)].join('\n');
+    // ①' 客户端 → 网关：base64 写法（Base64 内容已省略）
+    const cliJson = ['curl ' + qt(endpoint) + ' ' + BS, '  --request POST ' + BS,
+      '  --header ' + qt('Authorization: Bearer YOUR_QLIKE_TOKEN') + ' ' + BS,
+      '  --header ' + qt('Content-Type: application/json') + ' ' + BS,
+      '  --data ' + qt(JSON.stringify({data_url: 'data:' + mime + ';base64,<素材 base64 内容已省略>'}))].join('\n');
+    // ③ 网关 → 站点（按真实出站请求还原；凭据一律换成占位符）
+    const up = parse(l.upstream_request) || {};
+    const upHeaders = parse(l.upstream_headers) || up.headers || {};
+    let upCurl = '';
+    if (l.upstream_url) {
+      const out = ['curl ' + qt(l.upstream_url) + ' ' + BS, '  --request ' + (l.upstream_method || 'POST')];
+      Object.keys(upHeaders).forEach(k => { out[out.length - 1] += ' ' + BS; out.push('  --header ' + qt(k + ': ' + upHeaders[k])); });
+      ((up.multipart) || []).forEach(m => { out[out.length - 1] += ' ' + BS;
+        out.push('  --form ' + qt(m.field + '=@' + (m.filename || '素材') + (m.content_type ? ';type=' + m.content_type : ''))); });
+      Object.keys(up.data || {}).forEach(k => { out[out.length - 1] += ' ' + BS; out.push('  --form ' + qt(k + '=' + up.data[k])); });
+      upCurl = out.join('\n');
+    }
+    const attempts = t.attempts || [];
+    const attemptTable = attempts.length ? table(
+      ['顺序', '站点', '结果', '耗时', '直链 / 失败原因'],
+      attempts.map((a, i) => [`<span class="hint">${i + 1}</span>`,
+        `<b>${esc(a.label || a.host)}</b>` + (a.limit_mb ? `<div class="hint">上限 ${a.limit_mb}MB</div>` : ''),
+        a.ok ? pill('ok', '成功') : pill('err', a.error && /上限/.test(a.error) ? '跳过' : '失败'),
+        a.ms != null ? fmtMs(a.ms) : '—',
+        a.ok ? `<a class="mono" href="${esc(a.url || '')}" target="_blank" rel="noopener">${esc(String(a.url || '').slice(0, 80))}</a>`
+             : `<span class="hint">${esc(a.error || '')}</span>`])) : '<div class="hint">（直接透传，未经过任何站点）</div>';
+    const box = (id, title, txt) => `
+      <div class="curl-head mb-1"><label class="form-label mb-0">${title}</label>
+        <div class="acts"><button class="btn btn-sm btn-outline-secondary" onclick="act.matCopy('${id}','已复制')"><i class="ti ti-clipboard"></i> 复制</button></div></div>
+      <pre class="json mb-3" id="${id}">${esc(txt)}</pre>`;
+    modal(`素材转换 #${id}`, `
+      <div class="row mb-3">
+        ${l.http_status < 400 ? pill('ok', 'HTTP ' + l.http_status) : pill('err', 'HTTP ' + l.http_status)}
+        <span class="chip">${act.matKindLabel(t.kind_of)}</span>
+        ${t.bytes ? `<span class="chip mono">${fmtBytes(t.bytes)}</span>` : ''}
+        ${t.host ? `<span class="chip">${esc(t.host_label || t.host)}</span>` : ''}
+        <span class="chip">${act.matSourceLabel(t.source)}</span>
+        ${t.target && t.target !== 'auto' ? `<span class="chip">指定 ${esc(t.target)}</span>` : ''}
+        ${l.token ? `<span class="chip">${esc(l.token)}</span>` : '<span class="hint">内部调用</span>'}
+        ${pill('', fmtMs(l.ms))}
+      </div>
+      ${l.error ? `<label class="form-label">错误</label><pre class="json mb-3">${esc(l.error)}</pre>` : ''}
+      <div class="hint mb-3"><i class="ti ti-arrows-exchange"></i> 素材：<span class="mono">${esc(fname)}</span>
+        （${esc(mime)}${t.bytes ? ' · ' + fmtBytes(t.bytes) : ''}）→
+        ${t.url ? `<a class="mono" href="${esc(t.url)}" target="_blank" rel="noopener">${esc(String(t.url).slice(0, 70))}</a>` : '未产出直链'}
+        ${t.expires ? ` <span class="chip">有效期 ${esc(t.expires)}</span>` : ''}</div>
+      <label class="form-label">① 客户端 → 网关（文件上传，可直接复制执行）</label>
+      <pre class="json mb-3" id="matCliForm">${esc(cliForm)}</pre>
+      <label class="form-label">② 客户端 → 网关（Base64 写法 · 内容已省略）</label>
+      <pre class="json mb-3" id="matCliJson">${esc(cliJson)}</pre>
+      <div class="curl-head mb-1"><label class="form-label mb-0">③ 网关 → 站点（真实出站请求 · 凭据已掩码）</label>
+        <div class="acts">${upCurl ? `<button class="btn btn-sm btn-outline-secondary" onclick="act.matCopy('matUpCurl','已复制')"><i class="ti ti-clipboard"></i> 复制</button>` : ''}</div></div>
+      <pre class="json mb-3" id="matUpCurl">${esc(upCurl || '（本次没有出站请求：素材已是公网直链，原样透传）')}</pre>
+      <label class="form-label">转换链路（${attempts.length} 个候选，按顺序尝试，第一个成功即用）</label>
+      ${attemptTable}
+      <label class="form-label mt-3">原始报文 · 客户端请求</label>
+      <pre class="json mb-3">${esc(jsonTxt(l.request_json))}</pre>
+      <label class="form-label">原始报文 · 出站请求</label>
+      <pre class="json mb-3">${esc(jsonTxt(l.upstream_request))}</pre>
+      <label class="form-label">响应片段（结果直链）</label>
+      <pre class="json">${esc(jsonTxt(l.response_snippet) || '（空）')}</pre>`);
+  },
+
+  /* -------------------- 设置 · 素材中转 -------------------- */
+  matTable(d) {
+    const cfg = (d || {}).cfg || {}, chain = (cfg.chain || []).slice();
+    const ids = (d.hosts || []).map(h => h.id);
+    const order = chain.concat(ids.filter(id => !chain.includes(id)));
+    const byId = {}; (d.hosts || []).forEach(h => byId[h.id] = h);
+    return `<div class="table-wrap mt-2"><table class="tb ih-tb">
+      <thead><tr><th>启用</th><th>站点</th><th>接受类型</th><th>上限</th><th>有效期</th><th>上传地址</th><th class="ih-act">操作</th></tr></thead>
+      <tbody>${order.map(id => {
+        const h = byId[id] || {id: id, label: id, ttl: '', note: '', endpoint: ''};
+        const on = chain.includes(id);
+        const kinds = (h.kinds || ['image']).map(k => act.matKindLabel(k)).join(' / ');
+        const lim = h.limit_mb_by_kind && Object.keys(h.limit_mb_by_kind).length
+          ? Object.keys(h.limit_mb_by_kind).map(k => `${act.matKindLabel(k)} ${h.limit_mb_by_kind[k]}MB`).join('、')
+          : (h.limit_mb ? h.limit_mb + 'MB' : '—');
+        const noKey = h.station && !h.usable;
+        return `<tr>
+          <td><div class="form-check form-switch ih-sw">
+            <input class="form-check-input" type="checkbox" role="switch" data-mh="${esc(id)}"
+                   title="${on ? '点击停用' : '点击启用'} ${esc(h.label)}"
+                   aria-label="${on ? '停用' : '启用'} ${esc(h.label)}" ${on ? 'checked' : ''}
+                   onchange="act.matToggle('${esc(id)}', this.checked)"></div></td>
+          <td><b>${esc(h.label)}</b> ${on ? pill('ok dot', '已启用') : '<span class="chip">已停用</span>'}
+            ${noKey ? ' <span class="chip warn">未配 Key → 自动跳过</span>' : ''}${h.station ? ' <span class="chip">上游自托管</span>' : ''}
+            <span class="ih-note">${esc(h.note)}</span></td>
+          <td><span class="hint">${esc(kinds)}</span></td>
+          <td><span class="hint">${esc(lim)}</span></td>
+          <td><span class="chip">${esc(h.ttl)}</span></td>
+          <td class="ih-ep">${esc(h.endpoint)}</td>
+          <td class="ih-act">
+            <button class="btn btn-sm btn-outline-secondary" title="上移" aria-label="上移" onclick="act.matMove('${esc(id)}',-1)"><i class="ti ti-arrow-up"></i></button>
+            <button class="btn btn-sm btn-outline-secondary" title="下移" aria-label="下移" onclick="act.matMove('${esc(id)}',1)"><i class="ti ti-arrow-down"></i></button>
+            <button class="btn btn-sm btn-outline-secondary" title="上传 1×1 自检图" onclick="act.matTest('${esc(id)}')">自检</button>
+          </td></tr>`; }).join('')}</tbody>
+    </table></div>`;
+  },
+  matRefreshTable() { const w = $('#matTableWrap'); if (w && state.mat) w.innerHTML = act.matTable(state.mat); },
+
+  async loadMedia() {
+    const box = $('#matBox'); if (!box) return;
+    const r = await api('/api/settings/media');
+    if (!r || !r.ok || !r.data) { box.innerHTML = '<div class="hint">读取失败</div>'; return; }
+    const d = r.data, cfg = d.cfg || {};
+    state.mat = d;
+    $('#matState').innerHTML = cfg.enabled ? pill('ok', '已启用') : '<span class="pill">未启用</span>';
+    box.innerHTML = `
+      <div class="form-check form-switch mb-2">
+        <input class="form-check-input" type="checkbox" id="matEnabled" ${cfg.enabled ? 'checked' : ''}>
+        <label class="form-check-label" for="matEnabled">启用素材中转（<span class="mono">POST /v1/files</span>：图片 / 视频 / 音频 → 公网直链）</label>
+      </div>
+      <div class="hint">候选顺序：从上到下依次尝试，第一个成功即用。<b>每行的开关点一下立刻生效</b>（不用再点保存）。
+        视频 / 音频会自动跳过只收图片的 ImgBB；超过某站上限的素材会跳过并记明原因。</div>
+      <div id="matTableWrap">${act.matTable(d)}</div>
+      <div class="set-sec-t mt-4"><i class="ti ti-key"></i>上游文件站 Key</div>
+      <div class="row g-2">
+        <div class="col-md-6"><label class="form-label">速搭水文件站 Key
+          ${d.sudashui_key_set ? '（已配置 <span class="mono">' + esc(d.sudashui_key_masked) + '</span>，留空=不改）' : '（不填则跳过该站）'}</label>
+          <input id="matSdKey" class="form-control" autocomplete="off" placeholder="${d.sudashui_key_set ? '••••••••' : 'sk-...'}"></div>
+        <div class="col-md-6"><label class="form-label">佳速素材 CDN Key
+          ${d.jiasu_key_set ? '（已配置 <span class="mono">' + esc(d.jiasu_key_masked) + '</span>，留空=不改）' : '（不填则跳过该站）'}</label>
+          <input id="matJsKey" class="form-control" autocomplete="off" placeholder="${d.jiasu_key_set ? '••••••••' : 'sk-...'}"></div>
+      </div>
+      <div class="hint mt-2"><i class="ti ti-shield-lock"></i> Key 加密落库、只在服务端使用，面板只回掩码；
+        素材不落本机磁盘，直链就在对应站点的 CDN 上。</div>
+      <div class="d-flex gap-2 mt-3 align-items-center flex-wrap">
+        <button class="btn btn-primary" onclick="act.matSave()"><i class="ti ti-device-floppy"></i> 保存</button>
+        <button class="btn btn-outline-secondary" onclick="act.matTest('')"><i class="ti ti-upload"></i> 按链路自检</button>
+        <span class="hint">自检=真上传一张 1×1 像素图（不调用任何生成接口、不花钱）</span>
+      </div>
+      <div class="hint mt-2" id="matMsg"></div>`;
+  },
+
+  async matSave() {
+    const on = $$('#matBox input[data-mh]').filter(x => x.checked).map(x => x.dataset.mh);
+    const order = $$('#matBox [data-mh]').map(x => x.dataset.mh);
+    const body = {enabled: $('#matEnabled').checked, chain: order.filter(id => on.includes(id))};
+    const sd = ($('#matSdKey').value || '').trim(), jc = ($('#matJsKey').value || '').trim();
+    if (sd) body.sudashui_key = sd;
+    if (jc) body.jiasu_key = jc;
+    const r = await api('/api/settings/media', {method: 'POST', body});
+    if (r && r.ok) { toast('素材中转设置已保存'); act.loadMedia(); } else toast('保存失败', true);
+  },
+
+  async matToggle(id, on) {
+    const d = state.mat; if (!d) return;
+    const chain = (d.cfg.chain || []).slice();
+    const ids = (d.hosts || []).map(h => h.id);
+    const order = chain.concat(ids.filter(x => !chain.includes(x)));
+    const next = order.filter(x => (x === id ? on : chain.includes(x)));
+    const r = await api('/api/settings/media', {method: 'POST', body: {chain: next}});
+    if (!r || !r.ok || !r.data) { toast('切换失败，请重试', true); act.loadMedia(); return; }
+    state.mat = r.data; act.matRefreshTable();
+    const h = (d.hosts || []).find(x => x.id === id) || {};
+    toast(`${on ? '已启用' : '已停用'} ${h.label || id}`);
+  },
+
+  async matMove(id, dir) {
+    const d = state.mat; if (!d) return;
+    const chain = (d.cfg.chain || []).slice();
+    const ids = (d.hosts || []).map(h => h.id);
+    const order = chain.concat(ids.filter(x => !chain.includes(x)));
+    const i = order.indexOf(id), k = i + dir;
+    if (i < 0 || k < 0 || k >= order.length) return;
+    [order[i], order[k]] = [order[k], order[i]];
+    const on = $$('#matBox input[data-mh]').filter(x => x.checked).map(x => x.dataset.mh);
+    const r = await api('/api/settings/media', {method: 'POST', body: {chain: order.filter(x => on.includes(x))}});
+    if (r && r.ok && r.data) { state.mat = r.data; act.matRefreshTable(); } else toast('调整顺序失败', true);
+  },
+
+  async matTest(host) {
+    const msg = $('#matMsg');
+    if (msg) msg.textContent = '上传中…（最长 40 秒）';
+    const r = await api('/api/settings/media/test', {method: 'POST', body: host ? {host: host} : {}});
+    if (!r || !r.ok) {
+      const m = (r && r.data && r.data.error && r.data.error.message) || '自检失败';
+      if (msg) msg.innerHTML = '<span class="chip warn">' + esc(m) + '</span>';
+      return toast(m, true);
+    }
+    const d = r.data;
+    if (msg) msg.innerHTML = `✅ <b>${esc(d.host_label || d.host)}</b> 可用 → <a class="mono" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.url)}</a>`
+      + (d.verified ? '' : ` <span class="chip warn">回读未通过：${esc(d.verify_note || '')}</span>`)
+      + (d.warnings && d.warnings.length ? ` <span class="hint">（前面失败：${esc(d.warnings.join('；'))}）</span>` : '');
+    toast('素材中转自检通过：' + (d.host_label || d.host));
+  },
+
   /* -------------------- 异步任务 -------------------- */
   async loadJobs() {
     const r = await api('/api/jobs?limit=100');
@@ -2294,6 +2604,7 @@ const act = {
 
   async loadSettings() {
     act.loadImagehost();
+    act.loadMedia();
     const r = await api('/api/sysinfo');
     if (!r) return;
     const d = r.data, enc = d.enc || {}, counts = d.counts || {}, g = d.gate || {};

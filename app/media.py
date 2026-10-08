@@ -1,8 +1,8 @@
-"""素材上传中转：base64 / data URI / 本地文件 → 公网直链。
+"""素材上传中转：base64 / data URI / 本地文件 → 公网直链（图片 / 视频 / 音频通吃）。
 
 为什么存在这一层
 ----------------
-部分视频上游（速搭水 / MeAICC 等）**只接受公网 http(s) 素材**，由上游服务端自己去抓，
+部分视频上游（速搭水 / MeAICC / 佳速 等）**只接受公网 http(s) 素材**，由上游服务端自己去抓，
 base64 / 本地文件一律不收。而 New API 的 Task Plugin 沙箱里，插件自己**不能发 HTTP**
 （只能声明一个请求描述符交给宿主代发），所以「提交时自动把 base64 转直链」在插件里做不到 ——
 转换必须发生在网关这一层。
@@ -10,23 +10,33 @@ base64 / 本地文件一律不收。而 New API 的 Task Plugin 沙箱里，插�
 客户端只要把「参考素材中转 / 自定义上传接口」指向这里的 `POST /v1/files`，
 本地文件或 base64 就会先变成公网直链，再拿去提交视频任务，对最终用户是透明的。
 
+素材不止图片
+------------
+视频 / 音频素材走**上游自托管文件站**（速搭水文件站、佳速素材 CDN）—— 直链长期可读、
+就在上游自家 CDN 上，比免费临时图床稳得多；ImgBB 只收图片，视频/音频会自动跳过它。
+
 用法
 ----
     POST /v1/files
-    Authorization: Bearer <本服务令牌>        # 也支持 ?token=<令牌>（有些客户端加不了请求头）
+    Authorization: Bearer ***        # 也支持 ?token=<令牌>（有些客户端加不了请求头）
     Content-Type: multipart/form-data         # ① 直接传文件（字段名随意）
     Content-Type: application/json            # ② {"data_url":"data:image/png;base64,..."} / {"url":"https://..."}
-    Content-Type: image/png（裸字节）          # ③ 直接 POST 字节
+    Content-Type: video/mp4（裸字节）          # ③ 直接 POST 字节
 
-    返回 {"ok":true,"url":"https://...","host":"litterbox","mime":"image/png","bytes":1234,
-          "expires":"72h","expires_in":259200,"data":{"url":"..."}}
-    ?format=text → 只回纯文本 URL（给只认纯文本的客户端）
+    可选 ?target=sudashui|jiasu|imgbb|uguu|auto   指定落哪个站（不传=按链路顺序自动挑）
+    可选 ?format=text → 只回纯文本 URL（给只认纯文本的客户端）
+
+    返回 {"ok":true,"url":"https://...","host":"sudashui_files","host_label":"速搭水文件站",
+          "mime":"video/mp4","bytes":1234,"filename":"a.mp4","expires":"...",
+          "attempts":[{"host":"sudashui_files","ok":true,"status":200,"ms":431}],
+          "data":{"url":"..."}}
 
 铁律
 ----
   · 只上传「客户端手里」的素材（base64 / data URI / 裸字节）；已经是 http(s) 的一律原样返回。
-  · 素材不落本机磁盘，只落第三方图床；链路与凭据复用 imagehost.py（ImgBB Key 在服务端加密落库）。
-  · 图床未启用 / 无可用链路 / 全部失败 → 明确报错，绝不静默成功。
+  · 素材不落本机磁盘；上游站凭据走 crypto 加密落库，**绝不进日志、绝不进仓库**（日志里一律掩码）。
+  · 每次转换的完整链路（候选顺序 / 每站结果 / 耗时 / 最终直链）都写进日志，面板「素材日志」可还原。
+  · 站点未启用 / 无可用链路 / 全部失败 → 明确报错，绝不静默成功。
 """
 from __future__ import annotations
 
@@ -41,7 +51,7 @@ import urllib.parse
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from . import imagehost, relay, store
+from . import crypto, imagehost, relay, store
 
 router = APIRouter()
 
@@ -57,6 +67,55 @@ HOST_TTL_SECONDS: dict[str, int | None] = {
     "zero_x0": 60 * 86400,
 }
 
+#: 上游自托管文件站：比免费图床稳，且直链就在上游自家 CDN 上（视频/音频首选）
+STATIONS: dict[str, dict] = {
+    "sudashui_files": {
+        "label": "速搭水文件站",
+        "endpoint": "https://files.sudashuiapi.com",
+        "key_field": "sudashui_key",
+        "field": "file",
+        "limit_mb": 50,
+        "limit_mb_by_kind": {"image": 30, "video": 50, "audio": 15},
+        "kinds": ("image", "video", "audio"),
+        "ttl": "上游自托管（签名直链，约 2 小时）",
+        "note": "POST multipart（字段 file）+ Bearer Key → {url,key,size,contentType,expiresAt}",
+        "doc": "https://files.sudashuiapi.com",
+    },
+    "jiasu_media": {
+        "label": "佳速素材 CDN",
+        "endpoint": "https://ai.jiasuapi.com/v1/media/upload",
+        "key_field": "jiasu_key",
+        "field": "file",
+        "limit_mb": 32,
+        "limit_mb_by_kind": {"image": 32, "video": 32, "audio": 32},
+        "kinds": ("image", "video", "audio"),
+        "ttl": "上游自托管（长期）",
+        "note": "POST multipart（字段 file，可带 kind）+ Bearer Key → {success,data:{items:[{url}]}}；"
+                "注意 HTTP 恒 200，须判 success",
+        "doc": "https://ai.jiasuapi.com/v1/media/upload",
+    },
+}
+
+#: 上游站别名（客户端 ?target= 常用写法 → 内部 id）
+TARGET_ALIASES = {
+    "sudashui": "sudashui_files", "sudashui_files": "sudashui_files", "速搭水": "sudashui_files",
+    "sd": "sudashui_files", "files.sudashuiapi.com": "sudashui_files",
+    "jiasu": "jiasu_media", "jiasu_media": "jiasu_media", "佳速": "jiasu_media",
+    "jiasuapi": "jiasu_media", "ai.jiasuapi.com": "jiasu_media",
+    "imgbb": "imgbb", "litterbox": "litterbox", "uguu": "uguu",
+    "auto": "", "": "", "默认": "",
+}
+
+DEFAULT_CHAIN = ["sudashui_files", "jiasu_media", "imgbb", "uguu"]
+
+DEFAULTS = {
+    "enabled": True,
+    "chain": list(DEFAULT_CHAIN),
+    "sudashui_key": "",
+    "jiasu_key": "",
+    "verify": True,
+}
+
 #: imagehost.sniff_mime 只认图片；这里补视频/音频的文件头
 EXTRA_MAGIC: list[tuple[bytes, str]] = [
     (b"\x1a\x45\xdf\xa3", "video/webm"),
@@ -69,6 +128,105 @@ EXTRA_MAGIC: list[tuple[bytes, str]] = [
 
 PAYLOAD_KEYS = ("data_url", "dataUrl", "dataURI", "data_uri", "data", "base64", "b64",
                 "image", "file", "content", "source", "input", "media")
+
+SOURCE_LABELS = {"multipart": "文件上传", "value": "base64 / data URI", "bytes": "裸字节",
+                 "url": "公网链接透传"}
+
+
+# ------------------------------------------------------------------ 配置
+
+def settings() -> dict:
+    """读素材中转配置（上游站 Key 加密落库，读出来是明文，只在内存里用）。"""
+    raw = store.get_settings("media") or {}
+    cfg = dict(DEFAULTS)
+    for k, v in raw.items():
+        if k in ("sudashui_key", "jiasu_key"):
+            continue
+        cfg[k] = v
+    for k in ("sudashui_key", "jiasu_key"):
+        cfg[k] = crypto.decrypt(raw.get(k)) or ""
+    if not isinstance(cfg.get("chain"), list):
+        cfg["chain"] = list(DEFAULT_CHAIN)
+    cfg["chain"] = [h for h in cfg["chain"] if h in STATIONS or h in imagehost.HOSTS]
+    return cfg
+
+
+def save_settings(d: dict) -> dict:
+    """写素材中转配置；密钥传空字符串 = 保持原值不变。"""
+    cur = store.get_settings("media") or {}
+    out = dict(cur)
+    for k in ("enabled", "verify"):
+        if k in d:
+            out[k] = bool(d[k])
+    if "chain" in d:
+        out["chain"] = [h for h in (d["chain"] or []) if h in STATIONS or h in imagehost.HOSTS]
+    for k in ("sudashui_key", "jiasu_key"):
+        if d.get(k):
+            out[k] = crypto.encrypt(str(d[k]).strip())
+        elif d.get(k + "_clear"):
+            out[k] = ""
+    store.set_settings("media", out)
+    return settings()
+
+
+def host_meta(host: str) -> dict:
+    """统一取站点登记信息（上游文件站 + 图床）。"""
+    if host in STATIONS:
+        s = STATIONS[host]
+        return {"label": s["label"], "endpoint": s["endpoint"], "ttl": s["ttl"],
+                "note": s["note"], "kinds": s["kinds"], "limit_mb": s["limit_mb"],
+                "limit_mb_by_kind": s.get("limit_mb_by_kind") or {},
+                "key_field": s["key_field"]}
+    h = imagehost.HOSTS.get(host) or {}
+    kinds = ("image",) if host == "imgbb" else ("image", "video", "audio")
+    return {"label": h.get("label") or host, "endpoint": h.get("endpoint") or "",
+            "ttl": h.get("ttl") or "", "note": h.get("note") or "", "kinds": kinds,
+            "limit_mb": imagehost.DEFAULT_MAX_MB, "limit_mb_by_kind": {}, "key_field": "imgbb_key"}
+
+
+def _key_of(host: str, cfg: dict) -> str:
+    if host in STATIONS:
+        return str(cfg.get(STATIONS[host]["key_field"]) or "")
+    return str(cfg.get("imgbb_key") or "")
+
+
+def chain_for(kind: str, cfg: dict | None = None, target: str = "") -> list[str]:
+    """按素材类型 + 目标挑候选链。
+
+    · target 指定了具体站 → 只试它（用户明确要落哪个站就落哪个）
+    · 否则按配置的顺序试；跳过「类型不支持」「没配 Key」的站
+    """
+    cfg = cfg or settings()
+    if target:
+        return [target] if host_meta(target) else []
+    out = []
+    for h in cfg.get("chain") or []:
+        meta = host_meta(h)
+        if not meta.get("label"):
+            continue
+        if kind not in meta.get("kinds", ("image",)):
+            continue
+        if h in STATIONS or imagehost.HOSTS.get(h, {}).get("needs_key"):
+            if not _key_of(h, cfg):
+                continue
+        out.append(h)
+    return out
+
+
+def _limit_mb(host: str, kind: str) -> float:
+    meta = host_meta(host)
+    return float((meta.get("limit_mb_by_kind") or {}).get(kind) or meta.get("limit_mb") or 50)
+
+
+def kind_of(mime: str) -> str:
+    m = (mime or "").lower()
+    if m.startswith("image/"):
+        return "image"
+    if m.startswith("video/"):
+        return "video"
+    if m.startswith("audio/"):
+        return "audio"
+    return "file"
 
 
 # ------------------------------------------------------------------ 小工具
@@ -142,12 +300,14 @@ def detect(value: str) -> tuple[str, bytes, str | None]:
     return sn, raw, None
 
 
-def _chain_for(mime: str, cfg: dict) -> list[str]:
-    """按素材类型挑图床链：ImgBB 只接图片，视频/音频交给 Litterbox / Uguu。"""
-    chain = imagehost.chain_of(cfg)
-    if not (mime or "").startswith("image/"):
-        chain = [h for h in chain if h != "imgbb"]
-    return chain
+def _safe_name(name: str, mime: str, kind: str) -> str:
+    """给素材起个安全文件名（上游按扩展名判类型，必须有正确后缀）。"""
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(name or ""))[:80]
+    ext = os.path.splitext(name)[1].lower()
+    want = imagehost.MIME_EXT.get((mime or "").lower())
+    if not ext or (want and ext != want):
+        name = (os.path.splitext(name)[0] or kind or "material") + (want or ".bin")
+    return name
 
 
 def _readback_ok(url: str, cfg: dict) -> tuple[bool, str]:
@@ -166,30 +326,126 @@ def _readback_ok(url: str, cfg: dict) -> tuple[bool, str]:
         return False, f"回读失败：{type(exc).__name__}: {exc}"
 
 
-def upload_material(raw: bytes, mime: str, cfg: dict | None = None) -> tuple[str, str]:
-    """按候选链上传，返回 (公网直链, 图床名)；全挂抛 UploadFailed。"""
-    cfg = cfg or imagehost.settings()
-    if not cfg.get("enabled"):
-        raise imagehost.UploadFailed("图床未启用（面板「设置 → 图床」里开启后可上传素材）")
-    chain = _chain_for(mime, cfg)
+# ------------------------------------------------------------------ 上传实现
+
+def _outbound_desc(host: str, filename: str, mime: str, size: int, kind: str) -> dict:
+    """出站请求描述（给面板还原「网关 → 站点」的 curl；凭据一律掩码）。"""
+    meta = host_meta(host)
+    headers = {"Authorization": "Bearer YOUR_UPSTREAM_KEY"}
+    data = {"kind": kind} if host in STATIONS and host == "jiasu_media" else {}
+    return {"method": "POST", "url": meta["endpoint"], "headers": headers,
+            "multipart": [{"field": (STATIONS.get(host) or {}).get("field", "file"),
+                           "filename": filename, "content_type": mime, "size": size}],
+            "data": data, "host": host, "host_label": meta["label"]}
+
+
+def _post_station(host: str, raw: bytes, mime: str, filename: str, kind: str,
+                  cfg: dict) -> tuple[str, str]:
+    """把素材 POST 到上游自托管文件站，返回 (公网直链, 站方给的过期说明)。"""
+    s = STATIONS[host]
+    key = _key_of(host, cfg)
+    if not key:
+        raise imagehost.UploadFailed(f"{s['label']}: 未配置 Key（面板「设置 → 素材中转」里填）")
+    files = {s["field"]: (filename, raw, mime or "application/octet-stream")}
+    data = {"kind": kind} if host == "jiasu_media" else None
+    with imagehost._client(cfg) as c:
+        r = c.post(s["endpoint"], headers={"Authorization": f"Bearer {key}"},
+                   files=files, data=data)
+    body = (r.text or "")[:800]
+    if r.status_code >= 400:
+        raise imagehost.UploadFailed(f"{s['label']}: HTTP {r.status_code} {body[:200]}")
+    try:
+        j = r.json()
+    except Exception:
+        raise imagehost.UploadFailed(f"{s['label']}: 返回不是 JSON：{body[:200]}")
+    # 佳速：HTTP 恒 200，业务成败在 success 字段
+    if host == "jiasu_media":
+        if not j.get("success"):
+            raise imagehost.UploadFailed(f"{s['label']}: {j.get('message') or 'success=false'}")
+        items = ((j.get("data") or {}).get("items") or [])
+        url = (items[0] or {}).get("url") if items else ((j.get("data") or {}).get("url"))
+    else:
+        url = j.get("url")
+    if not imagehost.is_http(url or ""):
+        raise imagehost.UploadFailed(f"{s['label']}: 响应里没有可用直链：{body[:200]}")
+    # 速搭水会给 expiresAt（签名直链，实测约 2 小时）；佳速是长期 CDN
+    exp = str(j.get("expiresAt") or j.get("expires_at") or "").strip()
+    return str(url), exp
+
+
+def upload_material(raw: bytes, mime: str, filename: str = "", cfg: dict | None = None,
+                    target: str = "", trace: dict | None = None) -> tuple[str, str]:
+    """按候选链上传，返回 (公网直链, 站点 id)；全挂抛 UploadFailed。
+
+    trace 传入时会逐站写入尝试记录（面板「素材日志」用它还原完整转换链路）。
+    """
+    cfg = cfg or settings()
+    kind = kind_of(mime)
+    if not cfg.get("enabled", True):
+        raise imagehost.UploadFailed("素材中转未启用（面板「设置 → 素材中转」里开启）")
+    chain = chain_for(kind, cfg, target)
     if not chain:
-        raise imagehost.UploadFailed("没有可用的图床链路（ImgBB 未配 Key，且 Litterbox/Uguu 不在链路里）")
+        if target:
+            raise imagehost.UploadFailed(
+                f"指定的站点 {target} 不可用：类型 {kind} 不支持，或没配 Key（面板「设置 → 素材中转」）")
+        raise imagehost.UploadFailed(
+            "没有可用的素材站点：上游文件站没配 Key，且免费图床不在链路里（面板「设置 → 素材中转」）")
+    size_mb = len(raw) / 1048576
     failures: list[str] = []
     for host in chain:
-        try:
-            url = imagehost.upload(raw, mime, host, cfg)
-        except imagehost.UploadFailed as exc:
-            failures.append(f"{imagehost.HOSTS[host]['label']}: {exc}")
+        limit = _limit_mb(host, kind)
+        label = host_meta(host)["label"]
+        rec: dict = {"host": host, "label": label, "kind": kind, "limit_mb": limit}
+        if size_mb > limit:
+            rec.update({"ok": False, "error": f"素材 {size_mb:.1f}MB 超过该站上限 {limit:g}MB"})
+            failures.append(f"{label}: {rec['error']}")
+            if trace is not None:
+                trace.setdefault("attempts", []).append(rec)
             continue
+        t0 = time.time()
+        try:
+            if host in STATIONS:
+                url, exp_hint = _post_station(host, raw, mime, filename, kind, cfg)
+            else:
+                url, exp_hint = imagehost.upload(raw, mime, host, cfg), ""
+        except imagehost.UploadFailed as exc:
+            msg = str(exc)
+            if msg.startswith(label):          # 站点实现里已经带了前缀，别再叠一层
+                msg = msg.split(":", 1)[1].strip()
+            rec.update({"ok": False, "ms": int((time.time() - t0) * 1000), "error": msg})
+            failures.append(f"{label}: {msg}")
+            if trace is not None:
+                trace.setdefault("attempts", []).append(rec)
+            continue
+        ms = int((time.time() - t0) * 1000)
         ok, why = _readback_ok(url, cfg)
         if not ok:
-            failures.append(f"{imagehost.HOSTS[host]['label']}: 上传后回读校验失败（{why}）")
+            rec.update({"ok": False, "ms": ms, "url": url, "error": f"上传后回读校验失败（{why}）"})
+            failures.append(f"{label}: 上传后回读校验失败（{why}）")
+            if trace is not None:
+                trace.setdefault("attempts", []).append(rec)
             continue
+        rec.update({"ok": True, "status": 200, "ms": ms, "url": url})
+        if exp_hint:
+            rec["expires_at"] = exp_hint
+            if trace is not None:
+                trace["station_expires_at"] = exp_hint
+        if trace is not None:
+            trace.setdefault("attempts", []).append(rec)
         return url, host
-    raise imagehost.UploadFailed("；".join(failures) or "所有图床都失败了")
+    raise imagehost.UploadFailed("；".join(failures) or "所有站点都失败了")
 
 
-def _expires_info(host: str, cfg: dict) -> tuple[str, int | None]:
+def _expires_info(host: str, cfg: dict, station_expires: str = "",
+                  attempts: list | None = None) -> tuple[str, int | None]:
+    if host in STATIONS:
+        if not station_expires:
+            for a in (attempts or []):
+                if a.get("host") == host and a.get("expires_at"):
+                    station_expires = a["expires_at"]
+        if station_expires:
+            return f"{STATIONS[host]['ttl']}｜站方 expiresAt={station_expires}", None
+        return STATIONS[host]["ttl"], None
     label = (imagehost.HOSTS.get(host) or {}).get("ttl") or ""
     if host == "litterbox":
         raw = str(cfg.get("litterbox_time") or "72h").strip().lower()
@@ -233,7 +489,7 @@ async def _read_input(request: Request) -> tuple[str, object, str, str]:
         _, v = files[0]
         raw = await v.read()                    # type: ignore[union-attr]
         ctype = str(getattr(v, "content_type", "") or "")
-        return "bytes", bytes(raw), ctype.split(";")[0].strip(), str(getattr(v, "filename", "") or "")
+        return "multipart", bytes(raw), ctype.split(";")[0].strip(), str(getattr(v, "filename", "") or "")
 
     data: object = pre if pre else None
     if data is None and "application/json" in ct:
@@ -274,7 +530,7 @@ async def _read_input(request: Request) -> tuple[str, object, str, str]:
             if fname:
                 raw = await v.read()            # type: ignore[union-attr]
                 ctype = str(getattr(v, "content_type", "") or "")
-                return "bytes", bytes(raw), ctype.split(";")[0].strip(), str(fname)
+                return "multipart", bytes(raw), ctype.split(";")[0].strip(), str(fname)
         for _, v in form.multi_items():
             if isinstance(v, str) and v.strip():
                 value = v.strip()
@@ -288,7 +544,28 @@ async def _read_input(request: Request) -> tuple[str, object, str, str]:
     raise ValueError("请求体为空：请用 multipart 传文件、JSON 传 base64/链接，或直接 POST 字节")
 
 
+def _resolve_target(request: Request, pre_data: dict) -> str:
+    """取客户端指定的目标站点（query 优先，其次 JSON 里的 target / host / station）。"""
+    for src in (request.query_params.get("target"), request.query_params.get("host"),
+                request.query_params.get("station"),
+                pre_data.get("target") if isinstance(pre_data, dict) else None,
+                pre_data.get("station") if isinstance(pre_data, dict) else None):
+        if isinstance(src, str) and src.strip():
+            return TARGET_ALIASES.get(src.strip().lower(), src.strip().lower())
+    return ""
+
+
 # ------------------------------------------------------------------ 接口
+
+def _logs_payload(kind: str, mime: str, size: int, filename: str, source: str,
+                  target: str, cfg: dict) -> dict:
+    """客户端 → 网关 的请求留痕（base64 已被 store 的 compact_b64 压成占位）。"""
+    return {"kind": source, "source_label": SOURCE_LABELS.get(source, source),
+            "mime": mime, "bytes": size, "filename": filename or None,
+            "kind_of": kind_of(mime), "target": target or "auto",
+            "chain": chain_for(kind_of(mime), cfg, target),
+            "limit_mb": MAX_UPLOAD_MB}
+
 
 @router.post("/files")
 async def upload_file(request: Request):
@@ -297,32 +574,37 @@ async def upload_file(request: Request):
     if err is not None:
         return err
     try:
-        kind, value, mime, filename = await _read_input(request)
+        source, value, mime, filename = await _read_input(request)
     except ValueError as exc:
         return _err(str(exc), 400)
     as_text = (request.query_params.get("format") or "").lower() in ("text", "plain", "url", "string")
-    cfg = imagehost.settings()
+    cfg = settings()
     token_name = (access or {}).get("name")
     token_id = (access or {}).get("id")
+    pre = getattr(request.state, "json_body", None)
+    target = _resolve_target(request, pre if isinstance(pre, dict) else {})
 
-    # ① 已经是公网直链 → 原样返回（不转存、不浪费图床额度）
-    if kind == "url":
+    # ① 已经是公网直链 → 原样返回（不转存、不浪费站点额度）
+    if source == "url":
         url = str(value)
         if not imagehost.is_public_url(url):
             return _err(f"只接受公网 http(s) 素材直链，收到：{url[:80]}", 400)
+        trace = {"mode": "material", "source": source, "passthrough": True, "url": url,
+                 "target": target or "auto", "attempts": []}
         body = {"ok": True, "url": url, "link": url, "data": {"url": url},
                 "host": "passthrough", "host_label": "原样透传", "mime": "",
-                "bytes": None, "expires": "", "expires_in": None, "token": token_name}
-        store.log_row(provider="imagehost", model="(upload)", path="/v1/files", status=200,
+                "bytes": None, "expires": "", "expires_in": None, "token": token_name,
+                "attempts": []}
+        store.log_row(provider="material", model="(透传)", path="/v1/files", status=200,
                       up_status=None, ms=int((time.time() - started) * 1000), error=None,
-                      req={"kind": "url", "url": url}, up_req=None, snippet=url,
-                      kind="upload", token=token_name, token_id=token_id,
-                      imagehost={"host": "passthrough", "url": url})
+                      req={"kind": "url", "url": url, "target": target or "auto"}, up_req=None,
+                      snippet=url, kind="upload", token=token_name, token_id=token_id,
+                      imagehost=trace)
         return PlainTextResponse(url) if as_text else JSONResponse(body)
 
-    # ② base64 / data URI / 裸字节 → 落图床取直链
+    # ② base64 / data URI / 裸字节 / multipart 文件 → 落站取直链
     try:
-        if kind == "bytes":
+        if source in ("bytes", "multipart"):
             raw = value if isinstance(value, bytes) else str(value).encode("utf-8")
             if not mime or mime.startswith("application/octet-stream"):
                 mime = _sniff(raw) or mime or "application/octet-stream"
@@ -342,29 +624,45 @@ async def upload_file(request: Request):
         return _err("素材内容为空", 400)
     limit = int(MAX_UPLOAD_MB * 1024 * 1024)
     if len(raw) > limit:
-        return _err(f"素材 {len(raw) / 1048576:.1f}MB 超过上限 {MAX_UPLOAD_MB:g}MB", 413, "invalid_request_error")
+        return _err(f"素材 {len(raw) / 1048576:.1f}MB 超过上限 {MAX_UPLOAD_MB:g}MB", 413,
+                    "invalid_request_error")
 
+    kind = kind_of(mime)
+    filename = _safe_name(filename or "", mime, kind)
+    trace: dict = {"mode": "material", "source": source, "filename": filename, "mime": mime,
+                   "bytes": len(raw), "kind_of": kind, "target": target or "auto",
+                   "chain": chain_for(kind, cfg, target), "attempts": []}
+    req_log = _logs_payload(kind, mime, len(raw), filename, source, target, cfg)
     try:
-        url, host = upload_material(raw, mime, cfg)
+        url, host = upload_material(raw, mime, filename, cfg, target, trace)
     except imagehost.UploadFailed as exc:
-        store.log_row(provider="imagehost", model="(upload)", path="/v1/files", status=503,
+        trace["ok"] = False
+        store.log_row(provider="material", model=f"({kind})", path="/v1/files", status=503,
                       up_status=None, ms=int((time.time() - started) * 1000), error=str(exc),
-                      req={"kind": kind, "mime": mime, "bytes": len(raw), "filename": filename},
-                      up_req=None, snippet=None, kind="upload",
-                      token=token_name, token_id=token_id)
+                      req=req_log, up_req=None, snippet=None, kind="upload",
+                      token=token_name, token_id=token_id, imagehost=trace)
         return _err(f"素材上传失败：{exc}", 503, "upstream_error")
 
-    expires, expires_in = _expires_info(host, cfg)
+    expires, expires_in = _expires_info(host, cfg, "", trace.get("attempts"))
+    meta = host_meta(host)
+    trace.update({"ok": True, "host": host, "host_label": meta["label"], "url": url,
+                  "expires": expires, "ttl_seconds": expires_in})
+    attempts = trace.get("attempts") or []
+    warnings = [f"{a['label']}: {a.get('error')}" for a in attempts if not a.get("ok")]
     body = {"ok": True, "url": url, "link": url, "data": {"url": url},
-            "host": host, "host_label": (imagehost.HOSTS.get(host) or {}).get("label") or host,
-            "mime": mime, "bytes": len(raw), "filename": filename or None,
-            "expires": expires, "expires_in": expires_in, "token": token_name}
+            "host": host, "host_label": meta["label"], "mime": mime, "kind": kind,
+            "bytes": len(raw), "filename": filename or None,
+            "expires": expires, "expires_in": expires_in, "token": token_name,
+            "target": target or "auto", "attempts": attempts}
+    if warnings:
+        body["warnings"] = warnings
     if note:
         body["note"] = note
-    store.log_row(provider="imagehost", model="(upload)", path="/v1/files", status=200,
+    store.log_row(provider="material", model=f"({kind})", path="/v1/files", status=200,
                   up_status=200, ms=int((time.time() - started) * 1000), error=None,
-                  req={"kind": kind, "mime": mime, "bytes": len(raw), "filename": filename},
-                  up_req=None, snippet=url, kind="upload", images=1,
-                  token=token_name, token_id=token_id,
-                  imagehost={"host": host, "url": url, "mime": mime})
+                  req=req_log, up_req=_outbound_desc(host, filename, mime, len(raw), kind),
+                  snippet=url, kind="upload", images=1 if kind == "image" else None,
+                  token=token_name, token_id=token_id, up_url=meta["endpoint"], up_method="POST",
+                  up_headers=_outbound_desc(host, filename, mime, len(raw), kind)["headers"],
+                  imagehost=trace)
     return PlainTextResponse(url) if as_text else JSONResponse(body)

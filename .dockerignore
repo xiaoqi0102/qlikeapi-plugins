@@ -6,7 +6,7 @@ data/
 .env
 docker-compose.yml
 tests/
-docs/
+docs/*
 .github/
 .git/
 __pycache__/
@@ -19,3 +19,5 @@ venv/
 .vscode/
 *.md
 !app/**/*.md
+# 例外：接口文档要进镜像（/api-docs 在线页 + /api-docs.md 下载）
+!docs/api-docs.md

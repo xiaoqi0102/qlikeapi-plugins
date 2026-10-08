@@ -1,3 +1,24 @@
+## v3.19.0 — 2026-10-08
+
+### 新：素材中转支持「上游自托管文件站」（图片 / 视频 / 音频通吃）+ 素材日志 + 在线接口文档
+
+- **素材不止图片**：`POST /v1/files` 现在按素材类型挑站点 ——
+  新增两个**上游自托管文件站**：`sudashui_files`（速搭水文件站 `files.sudashuiapi.com`，单文件 图片 30MB /
+  视频 50MB / 音频 15MB，签名直链约 2 小时）与 `jiasu_media`（佳速素材 CDN `ai.jiasuapi.com/v1/media/upload`，
+  32MB，长期）。视频 / 音频自动跳过只收图片的 ImgBB；超过某站上限会跳过并在 `attempts` 里写明原因。
+  站点 Key 走 crypto 加密落库（设置页可配，面板只回掩码）。
+- **`?target=sudashui|jiasu|imgbb|uguu`**：指定落到哪个站（给某上游提交任务就用它自家的文件站最稳）。
+- **素材日志（面板新页面）**：`/v1/files` 每次转换的完整链路都会留痕 —— 来源形态（文件上传 / base64 /
+  裸字节 / 链接透传）、素材名与大小、候选顺序、每一站的尝试结果与耗时、最终直链与有效期；
+  详情弹窗可一键复制「客户端 → 网关」和「网关 → 站点」两条 curl（凭据一律掩码），也能看到原始报文。
+  请求日志页的类型筛选也加了「素材中转」。
+- **在线接口文档**：`GET /api-docs`（页面内渲染 Markdown，带目录 / 代码复制 / 深浅色）+
+  `GET /api-docs.md`（源文件，`?download=1` 直接下载）。文档源 `docs/api-docs.md` 升到 v1.1，
+  新增 §8 素材上传中转章节。公网入口：https://img.qlike.top/api-docs 。
+- 实测（2026-10-08）：伪 mp4 / 伪 mp3 → 速搭水文件站（R2 直链，回读 200）；PNG + `?target=jiasu` →
+  佳速 CDN；JSON base64 / data URI / `?format=text` / 链接透传 / 无鉴权 401 / 垃圾输入 400 全部符合预期；
+  面板 `/api/logs?kind=upload` 能取到完整转换链路。
+
 ## v3.18.0 — 2026-10-08
 
 ### 新：素材上传中转 `POST /v1/files`（base64 / data URI / 本地文件 → 公网直链）

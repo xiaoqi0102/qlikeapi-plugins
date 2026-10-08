@@ -355,6 +355,94 @@ async def api_imagehost_test(request: Request):
             "warnings": failures, "bytes": len(imagehost.TEST_PNG)}
 
 
+# ------------------------------------------------------------------ 素材中转（图片 / 视频 / 音频 → 公网直链）
+
+def _media_view() -> dict:
+    """给面板看的素材中转配置：站点 Key 只回掩码，绝不回明文。"""
+    from . import media
+    cfg = media.settings()
+    keys = {k: cfg.pop(k, "") for k in ("sudashui_key", "jiasu_key")}
+    hosts = []
+    for hid, meta in list(media.STATIONS.items()) + [(h, media.host_meta(h)) for h in imagehost.HOSTS]:
+        kf = meta.get("key_field") or "imgbb_key"
+        has = bool(keys.get(kf) if kf != "imgbb_key" else imagehost.settings().get("imgbb_key"))
+        hosts.append({"id": hid, "label": meta["label"], "endpoint": meta.get("endpoint") or "",
+                      "ttl": meta.get("ttl") or "", "note": meta.get("note") or "",
+                      "kinds": list(meta.get("kinds") or ("image",)),
+                      "limit_mb": meta.get("limit_mb"),
+                      "limit_mb_by_kind": meta.get("limit_mb_by_kind") or {},
+                      "needs_key": kf != "imgbb_key" or (hid in imagehost.HOSTS and imagehost.HOSTS[hid]["needs_key"]),
+                      "key_field": kf, "usable": has,
+                      "key_masked": store.mask(keys.get(kf, "")) if keys.get(kf) else "",
+                      "station": hid in media.STATIONS})
+    return {"ok": True, "cfg": cfg, "default_chain": media.DEFAULT_CHAIN,
+            "sudashui_key_set": bool(keys.get("sudashui_key")),
+            "sudashui_key_masked": store.mask(keys.get("sudashui_key", "")) if keys.get("sudashui_key") else "",
+            "jiasu_key_set": bool(keys.get("jiasu_key")),
+            "jiasu_key_masked": store.mask(keys.get("jiasu_key", "")) if keys.get("jiasu_key") else "",
+            "hosts": hosts}
+
+
+@router.get("/settings/media")
+async def api_media_get(request: Request):
+    u, err = need_user(request)
+    if err:
+        return err
+    return _media_view()
+
+
+@router.post("/settings/media")
+async def api_media_save(request: Request):
+    u, err = need_user(request)
+    if err:
+        return err
+    from . import media
+    d = await request.json()
+    try:
+        media.save_settings(d or {})
+    except Exception as exc:
+        return JSONResponse({"error": {"message": f"保存失败：{exc}"}}, status_code=400)
+    return _media_view()
+
+
+@router.post("/settings/media/test")
+async def api_media_test(request: Request):
+    """自检：真上传一张 1×1 PNG 到指定站点，确认能拿到可访问的公网直链。
+
+    只上传网关自带的一张小图（不调用任何生成接口、不花钱、不上传用户素材）。
+    """
+    u, err = need_user(request)
+    if err:
+        return err
+    from . import media
+    d = {}
+    try:
+        d = await request.json()
+    except Exception:
+        pass
+    cfg = media.settings()
+    target = media.TARGET_ALIASES.get(str(d.get("host") or "").strip().lower(),
+                                      str(d.get("host") or "").strip().lower())
+    chain = media.chain_for("image", cfg, target) or media.chain_for("image", cfg)
+    if not chain:
+        return JSONResponse({"error": {"message": "没有可用站点：先在下面配置 Key 并勾选链路"}},
+                            status_code=400)
+    trace: dict = {"mode": "material", "source": "selfcheck", "filename": "selfcheck.png",
+                   "mime": "image/png", "bytes": len(imagehost.TEST_PNG), "kind_of": "image",
+                   "target": target or "auto", "chain": chain, "attempts": []}
+    try:
+        url, host = media.upload_material(imagehost.TEST_PNG, "image/png", "selfcheck.png",
+                                          cfg, target, trace)
+    except imagehost.UploadFailed as exc:
+        return JSONResponse({"ok": False, "error": {"message": str(exc)}, "attempts": trace["attempts"]},
+                            status_code=400)
+    ok, why = imagehost.verify_url(url, cfg)
+    warnings = [f"{a['label']}: {a.get('error')}" for a in trace["attempts"] if not a.get("ok")]
+    return {"ok": True, "host": host, "host_label": media.host_meta(host)["label"], "url": url,
+            "verified": ok, "verify_note": why, "warnings": warnings,
+            "attempts": trace["attempts"], "bytes": len(imagehost.TEST_PNG)}
+
+
 @router.post("/providers")
 async def api_provider_upsert(request: Request):
     u, err = need_user(request)
@@ -594,7 +682,7 @@ def api_logs(request: Request, limit: int = 50, offset: int = 0, provider: str =
         where.append("(COALESCE(model,'') LIKE ? OR COALESCE(error,'') LIKE ? OR COALESCE(public_path,'') LIKE ?)")
         args += [f"%{q}%"] * 3
     sql = ("SELECT id,ts,provider,model,public_path,http_status,upstream_status,ms,error,kind,attempts,"
-           "key_index,response_snippet,token,token_id,images,cost,cost_currency FROM logs")
+           "key_index,response_snippet,token,token_id,images,cost,cost_currency,imagehost FROM logs")
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
