@@ -1,3 +1,26 @@
+## v3.18.0 — 2026-10-08
+
+### 新：素材上传中转 `POST /v1/files`（base64 / data URI / 本地文件 → 公网直链）
+
+- 起因：部分视频上游（速搭水 / MeAICC 等）**只接受公网 http(s) 素材**，由上游服务端自己抓取，
+  不收 base64 或本地文件；而 New API 的 Task Plugin 沙箱里插件**自己不能发 HTTP**
+  （只能声明一个请求交给宿主代发），所以「提交时自动把 base64 转直链」在插件层做不到 ——
+  转换必须落在网关这一层。
+- 新接口 `POST /v1/files`：
+  · 入参三选一：multipart 文件（字段名随意）／JSON（`url`、`data_url`、`base64`、`data`、`image`、`file` 等键）／裸字节；
+  · 出参 `{"ok":true,"url":"https://…","host":"imgbb","mime":…,"bytes":…,"expires":…,"data":{"url":…}}`，
+    加 `?format=text` 只回纯文本 URL（给只认纯文本的客户端）；
+  · 鉴权走本服务令牌（`Authorization: Bearer …`），也支持 `?token=`（有些客户端加不了请求头）；
+  · 已经是公网链接的素材**原样透传**（不转存、不浪费图床额度）；素材不落本机磁盘。
+- 图床链路复用 `imagehost.py`：图片走 ImgBB（长期）→ Litterbox → Uguu；
+  **非图片素材自动跳过 ImgBB**（它只收图片），落到 Litterbox / Uguu；
+  并给 `EXT_MIME/MIME_EXT` 补了视频/音频扩展名（否则图床拿不到后缀会按 `.png` 命名，上游按后缀判类型就废了）。
+- 实测（2026-10-08）：无鉴权 401；multipart ／ data URI ／ 裸 base64 + `?format=text` 全部拿到公网直链
+  （图片落 ImgBB `https://i.ibb.co/…`，回读 200 `image/png`）；伪 mp4 落 Uguu `https://d.uguu.se/xxx.mp4`；
+  公网入口 `https://img.qlike.top/v1/files` 可达；垃圾输入 400 且提示明确。
+- 已知：本机出口被 Litterbox 拒（响应 `No file!` —— catbox 家族对机房 IP 的常态拦截），
+  实际链路 = ImgBB（图片，长期）／Uguu（其它类型，约 3 小时）。视频素材只需活到上游抓取那一刻，够用。
+
 ## v3.17.1 — 2026-10-08
 
 ### 改：阶梯价改成「表单」录入（用户反馈：裸 JSON 不直观）

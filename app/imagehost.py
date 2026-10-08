@@ -69,10 +69,19 @@ EXT_MIME = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
     ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif",
     ".bmp": "image/bmp", ".tif": "image/tiff", ".tiff": "image/tiff", ".heic": "image/heic",
+    # 视频/音频：素材中转（media.py）用得上 —— 图床拿不到扩展名会按 .png 命名，上游按后缀判类型时就废了
+    ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".mkv": "video/x-matroska", ".avi": "video/x-msvideo", ".m4v": "video/x-m4v",
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav",
+    ".ogg": "audio/ogg", ".flac": "audio/flac", ".aac": "audio/aac",
 }
 MIME_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
             "image/gif": ".gif", "image/avif": ".avif", "image/bmp": ".bmp",
-            "image/tiff": ".tiff", "image/heic": ".heic"}
+            "image/tiff": ".tiff", "image/heic": ".heic",
+            "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm",
+            "video/x-matroska": ".mkv", "video/x-msvideo": ".avi", "video/x-m4v": ".m4v",
+            "audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/wav": ".wav",
+            "audio/ogg": ".ogg", "audio/flac": ".flac", "audio/aac": ".aac"}
 
 MAGIC = [(b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"),
          (b"GIF87a", "image/gif"), (b"GIF89a", "image/gif"), (b"BM", "image/bmp")]

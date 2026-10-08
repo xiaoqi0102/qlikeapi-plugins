@@ -11,6 +11,7 @@ qlikeapi-plugins v3 —— 图片协议转换网关（挂在 New API 后面当�
   protocols.py     协议实现（gemini_native / openai_images / qiniu_fal 队列）
   channels/        ★ 渠道插件目录：放一个 .py 就是一个新渠道类型，Web 上点「重载插件」即时生效
   relay.py         /up/<渠道>/v1/images/{generations,edits} 转发（含 key 轮换）
+  media.py         /v1/files 素材上传中转：base64/data URI/文件 → 图床公网直链
   admin.py         控制台 API：账号密码登录、渠道管理、插件重载、日志、探活
   static/          控制台页面
 
@@ -27,14 +28,15 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
-from . import admin, channels, relay, store
+from . import admin, channels, media, relay, store
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 
-app = FastAPI(title="qlikeapi-plugins", version = "3.17.1")
+app = FastAPI(title="qlikeapi-plugins", version = "3.18.0")
 app.include_router(relay.router, prefix="/up", tags=["upstream"])
 app.include_router(relay.router_v1, prefix="/v1", tags=["router"])   # 统一入口：New API 只挂这一个渠道
+app.include_router(media.router, prefix="/v1", tags=["media"])       # 素材上传中转：base64/文件 → 公网直链
 app.include_router(admin.router, tags=["admin"])
 
 
