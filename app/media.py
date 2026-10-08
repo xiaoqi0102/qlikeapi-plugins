@@ -108,11 +108,21 @@ TARGET_ALIASES = {
 
 DEFAULT_CHAIN = ["sudashui_files", "jiasu_media", "imgbb", "uguu"]
 
+#: 面板「编辑」能改的字段（存在 settings["hosts"][站点id]，Key 加密落库）
+HOST_FIELDS = ("label", "endpoint", "ttl", "note", "limit_mb", "kinds", "field")
+
+#: 内置适配器的免费图床：接口地址/字段名是代码里写死的，只能改展示类字段（Key 例外）
+FREE_HOST_FIELDS = ("label", "ttl", "note", "limit_mb")
+
+#: 自托管上游文件站（速搭水 / 佳速…）：地址、Key、字段名全部可改，改完立刻生效
+STATION_FIELDS = ("label", "endpoint", "key", "kinds", "limit_mb", "ttl", "note", "field")
+
 DEFAULTS = {
     "enabled": True,
     "chain": list(DEFAULT_CHAIN),
     "sudashui_key": "",
     "jiasu_key": "",
+    "hosts": {},
     "verify": True,
 }
 
@@ -140,11 +150,28 @@ def settings() -> dict:
     raw = store.get_settings("media") or {}
     cfg = dict(DEFAULTS)
     for k, v in raw.items():
-        if k in ("sudashui_key", "jiasu_key"):
+        if k in ("sudashui_key", "jiasu_key", "hosts"):
             continue
         cfg[k] = v
     for k in ("sudashui_key", "jiasu_key"):
         cfg[k] = crypto.decrypt(raw.get(k)) or ""
+    # 站点自定义（面板「编辑」）：Key 解密、其余字段原样
+    cfg["hosts"] = {}
+    for hid, o in (raw.get("hosts") or {}).items():
+        if hid not in STATIONS and hid not in imagehost.HOSTS or not isinstance(o, dict):
+            continue
+        item = {f: o[f] for f in HOST_FIELDS if o.get(f) not in (None, "")}
+        key = crypto.decrypt(o.get("key")) or ""
+        if key:
+            item["key"] = key
+        if item:
+            cfg["hosts"][hid] = item
+    # 免费图床（ImgBB 等）的 Key 由 imagehost 模块管；统一入口后这里也读一份，链路判断才不会误跳过
+    if not cfg.get("imgbb_key"):
+        try:
+            cfg["imgbb_key"] = imagehost.settings().get("imgbb_key") or ""
+        except Exception:
+            cfg["imgbb_key"] = ""
     if not isinstance(cfg.get("chain"), list):
         cfg["chain"] = list(DEFAULT_CHAIN)
     cfg["chain"] = [h for h in cfg["chain"] if h in STATIONS or h in imagehost.HOSTS]
@@ -152,7 +179,11 @@ def settings() -> dict:
 
 
 def save_settings(d: dict) -> dict:
-    """写素材中转配置；密钥传空字符串 = 保持原值不变。"""
+    """写素材中转配置；密钥传空字符串 = 保持原值不变。
+
+    d["hosts"] 是「站点编辑」的补丁：{站点id: {label/endpoint/key/kinds/limit_mb/ttl/note/field}}，
+    key 传值=覆盖、key_clear=true=清空、_reset=true=整行恢复默认。
+    """
     cur = store.get_settings("media") or {}
     out = dict(cur)
     for k in ("enabled", "verify"):
@@ -165,29 +196,100 @@ def save_settings(d: dict) -> dict:
             out[k] = crypto.encrypt(str(d[k]).strip())
         elif d.get(k + "_clear"):
             out[k] = ""
+    if isinstance(d.get("hosts"), dict):
+        ov = dict(out.get("hosts") or {})
+        for hid, patch in d["hosts"].items():
+            if hid not in STATIONS and hid not in imagehost.HOSTS or not isinstance(patch, dict):
+                continue
+            if patch.get("_reset"):
+                ov.pop(hid, None)
+                continue
+            item = dict(ov.get(hid) or {})
+            allowed = STATION_FIELDS if hid in STATIONS else FREE_HOST_FIELDS
+            for f in HOST_FIELDS:
+                if f == "field" or f not in patch:
+                    continue
+                if f not in allowed and not (f == "key" and hid in imagehost.HOSTS):
+                    continue
+                v = patch[f]
+                if f == "kinds":
+                    v = [k for k in (v or []) if k in ("image", "video", "audio")]
+                    if not v:
+                        continue
+                elif f == "limit_mb":
+                    try:
+                        v = float(v)
+                    except (TypeError, ValueError):
+                        continue
+                    if v <= 0:
+                        continue
+                elif isinstance(v, str):
+                    v = v.strip()
+                    if not v and f in ("label", "endpoint"):
+                        continue          # 名称/地址不许清空
+                item[f] = v
+            if hid in STATIONS and patch.get("field"):
+                fv = str(patch["field"]).strip()
+                if fv:
+                    item["field"] = fv
+            if patch.get("key"):
+                item["key"] = crypto.encrypt(str(patch["key"]).strip())
+            elif patch.get("key_clear"):
+                item.pop("key", None)
+            if item:
+                item["custom"] = True
+                ov[hid] = item
+            else:
+                ov.pop(hid, None)
+        out["hosts"] = ov
     store.set_settings("media", out)
     return settings()
 
 
-def host_meta(host: str) -> dict:
-    """统一取站点登记信息（上游文件站 + 图床）。"""
+def _override(host: str, cfg: dict | None) -> dict:
+    return ((cfg or {}).get("hosts") or {}).get(host) or {}
+
+
+def host_meta(host: str, cfg: dict | None = None) -> dict:
+    """统一取站点登记信息（上游文件站 + 图床），并叠加面板「编辑」里的自定义值。"""
+    cfg = settings() if cfg is None else cfg
     if host in STATIONS:
         s = STATIONS[host]
-        return {"label": s["label"], "endpoint": s["endpoint"], "ttl": s["ttl"],
-                "note": s["note"], "kinds": s["kinds"], "limit_mb": s["limit_mb"],
-                "limit_mb_by_kind": s.get("limit_mb_by_kind") or {},
-                "key_field": s["key_field"]}
-    h = imagehost.HOSTS.get(host) or {}
-    kinds = ("image",) if host == "imgbb" else ("image", "video", "audio")
-    return {"label": h.get("label") or host, "endpoint": h.get("endpoint") or "",
-            "ttl": h.get("ttl") or "", "note": h.get("note") or "", "kinds": kinds,
-            "limit_mb": imagehost.DEFAULT_MAX_MB, "limit_mb_by_kind": {}, "key_field": "imgbb_key"}
+        base = {"label": s["label"], "endpoint": s["endpoint"], "ttl": s["ttl"],
+                "note": s["note"], "kinds": tuple(s["kinds"]),
+                "limit_mb": s["limit_mb"], "limit_mb_by_kind": s.get("limit_mb_by_kind") or {},
+                "field": s.get("field") or "file", "key_field": s["key_field"]}
+    else:
+        h = imagehost.HOSTS.get(host) or {}
+        kinds = ("image",) if host == "imgbb" else ("image", "video", "audio")
+        base = {"label": h.get("label") or host, "endpoint": h.get("endpoint") or "",
+                "ttl": h.get("ttl") or "", "note": h.get("note") or "", "kinds": kinds,
+                "limit_mb": imagehost.DEFAULT_MAX_MB, "limit_mb_by_kind": {},
+                "field": "file", "key_field": "imgbb_key"}
+    ov = _override(host, cfg)
+    for f in ("label", "endpoint", "ttl", "note", "limit_mb", "kinds", "field"):
+        if f in ov:
+            base[f] = tuple(ov[f]) if f == "kinds" else ov[f]
+    base["custom"] = bool(ov)
+    base["custom_fields"] = sorted(ov.keys())
+    base["editable"] = STATION_FIELDS if host in STATIONS else \
+        (FREE_HOST_FIELDS + ("key",) if host == "imgbb" else FREE_HOST_FIELDS)
+    return base
 
 
 def _key_of(host: str, cfg: dict) -> str:
+    ov_key = _override(host, cfg).get("key")
+    if ov_key:
+        return str(ov_key)
     if host in STATIONS:
         return str(cfg.get(STATIONS[host]["key_field"]) or "")
     return str(cfg.get("imgbb_key") or "")
+
+
+def key_state(host: str, cfg: dict) -> tuple[bool, str]:
+    """该站点的 Key 状态（面板只回掩码）。"""
+    k = _key_of(host, cfg)
+    return bool(k), (store.mask(k) if k else "")
 
 
 def chain_for(kind: str, cfg: dict | None = None, target: str = "") -> list[str]:
@@ -198,10 +300,10 @@ def chain_for(kind: str, cfg: dict | None = None, target: str = "") -> list[str]
     """
     cfg = cfg or settings()
     if target:
-        return [target] if host_meta(target) else []
+        return [target] if host_meta(target, cfg) else []
     out = []
     for h in cfg.get("chain") or []:
-        meta = host_meta(h)
+        meta = host_meta(h, cfg)
         if not meta.get("label"):
             continue
         if kind not in meta.get("kinds", ("image",)):
@@ -213,8 +315,8 @@ def chain_for(kind: str, cfg: dict | None = None, target: str = "") -> list[str]
     return out
 
 
-def _limit_mb(host: str, kind: str) -> float:
-    meta = host_meta(host)
+def _limit_mb(host: str, kind: str, cfg: dict | None = None) -> float:
+    meta = host_meta(host, cfg)
     return float((meta.get("limit_mb_by_kind") or {}).get(kind) or meta.get("limit_mb") or 50)
 
 
@@ -332,9 +434,9 @@ def _outbound_desc(host: str, filename: str, mime: str, size: int, kind: str) ->
     """出站请求描述（给面板还原「网关 → 站点」的 curl；凭据一律掩码）。"""
     meta = host_meta(host)
     headers = {"Authorization": "Bearer YOUR_UPSTREAM_KEY"}
-    data = {"kind": kind} if host in STATIONS and host == "jiasu_media" else {}
+    data = {"kind": kind} if host == "jiasu_media" else {}
     return {"method": "POST", "url": meta["endpoint"], "headers": headers,
-            "multipart": [{"field": (STATIONS.get(host) or {}).get("field", "file"),
+            "multipart": [{"field": meta.get("field") or "file",
                            "filename": filename, "content_type": mime, "size": size}],
             "data": data, "host": host, "host_label": meta["label"]}
 
@@ -342,32 +444,33 @@ def _outbound_desc(host: str, filename: str, mime: str, size: int, kind: str) ->
 def _post_station(host: str, raw: bytes, mime: str, filename: str, kind: str,
                   cfg: dict) -> tuple[str, str]:
     """把素材 POST 到上游自托管文件站，返回 (公网直链, 站方给的过期说明)。"""
-    s = STATIONS[host]
+    s = host_meta(host, cfg)          # 面板「编辑」改过的地址 / 字段名在这里生效
+    label = s.get("label") or host
     key = _key_of(host, cfg)
     if not key:
-        raise imagehost.UploadFailed(f"{s['label']}: 未配置 Key（面板「设置 → 素材中转」里填）")
-    files = {s["field"]: (filename, raw, mime or "application/octet-stream")}
+        raise imagehost.UploadFailed(f"{label}: 未配置 Key（面板「设置 → 素材中转」里点该行「编辑」填）")
+    files = {(s.get("field") or "file"): (filename, raw, mime or "application/octet-stream")}
     data = {"kind": kind} if host == "jiasu_media" else None
     with imagehost._client(cfg) as c:
         r = c.post(s["endpoint"], headers={"Authorization": f"Bearer {key}"},
                    files=files, data=data)
     body = (r.text or "")[:800]
     if r.status_code >= 400:
-        raise imagehost.UploadFailed(f"{s['label']}: HTTP {r.status_code} {body[:200]}")
+        raise imagehost.UploadFailed(f"{label}: HTTP {r.status_code} {body[:200]}")
     try:
         j = r.json()
     except Exception:
-        raise imagehost.UploadFailed(f"{s['label']}: 返回不是 JSON：{body[:200]}")
+        raise imagehost.UploadFailed(f"{label}: 返回不是 JSON：{body[:200]}")
     # 佳速：HTTP 恒 200，业务成败在 success 字段
     if host == "jiasu_media":
         if not j.get("success"):
-            raise imagehost.UploadFailed(f"{s['label']}: {j.get('message') or 'success=false'}")
+            raise imagehost.UploadFailed(f"{label}: {j.get('message') or 'success=false'}")
         items = ((j.get("data") or {}).get("items") or [])
         url = (items[0] or {}).get("url") if items else ((j.get("data") or {}).get("url"))
     else:
         url = j.get("url")
     if not imagehost.is_http(url or ""):
-        raise imagehost.UploadFailed(f"{s['label']}: 响应里没有可用直链：{body[:200]}")
+        raise imagehost.UploadFailed(f"{label}: 响应里没有可用直链：{body[:200]}")
     # 速搭水会给 expiresAt（签名直链，实测约 2 小时）；佳速是长期 CDN
     exp = str(j.get("expiresAt") or j.get("expires_at") or "").strip()
     return str(url), exp
@@ -393,8 +496,8 @@ def upload_material(raw: bytes, mime: str, filename: str = "", cfg: dict | None 
     size_mb = len(raw) / 1048576
     failures: list[str] = []
     for host in chain:
-        limit = _limit_mb(host, kind)
-        label = host_meta(host)["label"]
+        limit = _limit_mb(host, kind, cfg)
+        label = host_meta(host, cfg)["label"]
         rec: dict = {"host": host, "label": label, "kind": kind, "limit_mb": limit}
         if size_mb > limit:
             rec.update({"ok": False, "error": f"素材 {size_mb:.1f}MB 超过该站上限 {limit:g}MB"})
@@ -444,9 +547,9 @@ def _expires_info(host: str, cfg: dict, station_expires: str = "",
                 if a.get("host") == host and a.get("expires_at"):
                     station_expires = a["expires_at"]
         if station_expires:
-            return f"{STATIONS[host]['ttl']}｜站方 expiresAt={station_expires}", None
-        return STATIONS[host]["ttl"], None
-    label = (imagehost.HOSTS.get(host) or {}).get("ttl") or ""
+            return f"{host_meta(host, cfg)['ttl']}｜站方 expiresAt={station_expires}", None
+        return host_meta(host, cfg)["ttl"], None
+    label = host_meta(host, cfg).get("ttl") or ""
     if host == "litterbox":
         raw = str(cfg.get("litterbox_time") or "72h").strip().lower()
         m = re.match(r"(\d+)\s*([hdm])", raw)
@@ -457,8 +560,42 @@ def _expires_info(host: str, cfg: dict, station_expires: str = "",
     return label, HOST_TTL_SECONDS.get(host)
 
 
+#: 中转站令牌校验结果缓存（token → 过期时间戳）。素材中转直接认中转站令牌：
+#: 客户端手里通常只有那一把 key，不该逼它再配一把网关令牌。
+_NEWAPI_KEY_OK: dict[str, float] = {}
+
+
+def _newapi_base() -> str:
+    return (os.environ.get("NEWAPI_BASE_URL") or os.environ.get("QLIKEAPI_NEWAPI_BASE")
+            or "http://new-api:3000").rstrip("/")
+
+
+def _newapi_key_ok(key: str) -> bool:
+    """拿这个 key 打中转站 `GET /v1/models`：有效令牌才会 200（零成本、不产内容）。结果缓存 2 分钟。"""
+    now = time.time()
+    if _NEWAPI_KEY_OK.get(key, 0) > now:
+        return True
+    try:
+        import httpx
+        with httpx.Client(timeout=6.0) as c:
+            r = c.get(_newapi_base() + "/v1/models", headers={"Authorization": "Bearer " + key})
+        if r.status_code != 200:
+            return False
+    except Exception:
+        return False
+    if len(_NEWAPI_KEY_OK) > 500:          # 简单的容量兜底，别无限涨
+        _NEWAPI_KEY_OK.clear()
+    _NEWAPI_KEY_OK[key] = now + 120
+    return True
+
+
 def _authorize(request: Request):
-    """先走 relay 的三道门；再兜一层 ?token= / ?key=（有些客户端加不了请求头）。"""
+    """三道门 + 两道兜底：
+
+    ① relay 的三道门（内部主密钥 / 控制台会话 / 网关访问令牌）
+    ② `?token=` / `?key=`（有些客户端加不了请求头）
+    ③ 中转站令牌（客户端手里通常只有它：直接用 api.qlike.top 那把 key 即可）
+    """
     access, err = relay._authorize(request)
     if err is None:
         return access, None
@@ -471,6 +608,9 @@ def _authorize(request: Request):
         if row and row.get("enabled"):
             return {"kind": "token", "name": row.get("name") or f"令牌#{row['id']}",
                     "id": row["id"], "row": row}, None
+    secret = relay._presented_secret(request) or tok
+    if secret and _newapi_key_ok(secret):
+        return {"kind": "token", "name": "中转站令牌", "id": None, "row": None}, None
     return None, err
 
 

@@ -357,30 +357,71 @@ async def api_imagehost_test(request: Request):
 
 # ------------------------------------------------------------------ 素材中转（图片 / 视频 / 音频 → 公网直链）
 
+def _sync_imagehost(d: dict) -> None:
+    """把统一设置卡的内容同步给图床模块（参考图 base64→直链 仍由它执行）。
+
+    · 免费图床 Key：站点「编辑」里填的 key（hosts.imgbb.key）或顶层 imgbb_key
+    · 全局参数：最大体积 / 超时 / Litterbox 有效期 / 回读校验
+    · 链路：统一表勾选的免费图床 = 图床模块的候选链（单一事实来源，避免两处不一致）
+    """
+    patch: dict = {}
+    for k in ("max_mb", "timeout_s", "litterbox_time", "verify"):
+        if k in d and d[k] is not None:
+            patch[k] = d[k]
+    if "ref_enabled" in d:
+        patch["enabled"] = bool(d["ref_enabled"])
+    if d.get("imgbb_key"):
+        patch["imgbb_key"] = d["imgbb_key"]
+    elif d.get("imgbb_key_clear"):
+        patch["imgbb_key_clear"] = True
+    p_img = (d.get("hosts") or {}).get("imgbb") or {}
+    if isinstance(p_img, dict) and p_img.get("key"):
+        patch["imgbb_key"] = p_img["key"]
+    if d.get("chain") is not None:
+        patch["chain"] = [h for h in (d.get("chain") or []) if h in imagehost.HOSTS]
+    if patch:
+        imagehost.save_settings(patch)
+
+
 def _media_view() -> dict:
-    """给面板看的素材中转配置：站点 Key 只回掩码，绝不回明文。"""
+    """给面板看的素材中转配置：站点 Key 只回掩码，绝不回明文。
+
+    这是**唯一**的素材/图床设置入口（原来那张「图床」卡片已并入这里）：
+    站点顺序、每站开关、自定义编辑、全局参数（体积/超时/参考图转换）都在这一张表里。
+    """
     from . import media
     cfg = media.settings()
-    keys = {k: cfg.pop(k, "") for k in ("sudashui_key", "jiasu_key")}
+    ih = imagehost.settings()
     hosts = []
-    for hid, meta in list(media.STATIONS.items()) + [(h, media.host_meta(h)) for h in imagehost.HOSTS]:
-        kf = meta.get("key_field") or "imgbb_key"
-        has = bool(keys.get(kf) if kf != "imgbb_key" else imagehost.settings().get("imgbb_key"))
+    for hid in list(media.STATIONS.keys()) + list(imagehost.HOSTS.keys()):
+        meta = media.host_meta(hid, cfg)
+        kset, kmask = media.key_state(hid, cfg)
+        station = hid in media.STATIONS
         hosts.append({"id": hid, "label": meta["label"], "endpoint": meta.get("endpoint") or "",
                       "ttl": meta.get("ttl") or "", "note": meta.get("note") or "",
-                      "kinds": list(meta.get("kinds") or ("image",)),
+                      "kinds": [k for k in (meta.get("kinds") or ("image",))],
                       "limit_mb": meta.get("limit_mb"),
                       "limit_mb_by_kind": meta.get("limit_mb_by_kind") or {},
-                      "needs_key": kf != "imgbb_key" or (hid in imagehost.HOSTS and imagehost.HOSTS[hid]["needs_key"]),
-                      "key_field": kf, "usable": has,
-                      "key_masked": store.mask(keys.get(kf, "")) if keys.get(kf) else "",
-                      "station": hid in media.STATIONS})
-    return {"ok": True, "cfg": cfg, "default_chain": media.DEFAULT_CHAIN,
-            "sudashui_key_set": bool(keys.get("sudashui_key")),
-            "sudashui_key_masked": store.mask(keys.get("sudashui_key", "")) if keys.get("sudashui_key") else "",
-            "jiasu_key_set": bool(keys.get("jiasu_key")),
-            "jiasu_key_masked": store.mask(keys.get("jiasu_key", "")) if keys.get("jiasu_key") else "",
-            "hosts": hosts}
+                      "field": meta.get("field") or "file",
+                      "needs_key": station or bool((imagehost.HOSTS.get(hid) or {}).get("needs_key")),
+                      "key_field": (media.STATIONS.get(hid) or {}).get("key_field") or "imgbb_key",
+                      "key_set": kset, "key_masked": kmask,
+                      "editable": list(meta.get("editable") or []),
+                      "custom": bool(meta.get("custom")),
+                      "custom_fields": list(meta.get("custom_fields") or []),
+                      "station": station,
+                      "builtin": {f: (media.STATIONS.get(hid) or {}).get(f) for f in ("label", "endpoint", "field", "ttl", "note", "limit_mb")}})
+    # 面板绝不能拿到明文 Key
+    safe = {k: v for k, v in cfg.items() if k not in ("sudashui_key", "jiasu_key", "hosts", "imgbb_key")}
+    safe["hosts"] = {hid: {k: v for k, v in (o or {}).items() if k != "key"}
+                     for hid, o in (cfg.get("hosts") or {}).items()}
+    return {"ok": True, "cfg": safe, "default_chain": media.DEFAULT_CHAIN, "hosts": hosts,
+            "params": {"max_mb": ih.get("max_mb"), "timeout_s": ih.get("timeout_s"),
+                       "litterbox_time": ih.get("litterbox_time"), "verify": ih.get("verify")},
+            "ref_enabled": bool(ih.get("enabled")),
+            "imgbb_key_set": bool(ih.get("imgbb_key")),
+            "imgbb_key_masked": store.mask(ih.get("imgbb_key") or "") if ih.get("imgbb_key") else "",
+            "key_fields": ["sudashui_key", "jiasu_key"]}
 
 
 @router.get("/settings/media")
@@ -400,6 +441,7 @@ async def api_media_save(request: Request):
     d = await request.json()
     try:
         media.save_settings(d or {})
+        _sync_imagehost(d or {})
     except Exception as exc:
         return JSONResponse({"error": {"message": f"保存失败：{exc}"}}, status_code=400)
     return _media_view()

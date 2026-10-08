@@ -2199,7 +2199,7 @@ const act = {
         const lim = h.limit_mb_by_kind && Object.keys(h.limit_mb_by_kind).length
           ? Object.keys(h.limit_mb_by_kind).map(k => `${act.matKindLabel(k)} ${h.limit_mb_by_kind[k]}MB`).join('、')
           : (h.limit_mb ? h.limit_mb + 'MB' : '—');
-        const noKey = h.station && !h.usable;
+        const noKey = h.needs_key && !h.key_set;
         return `<tr>
           <td><div class="form-check form-switch ih-sw">
             <input class="form-check-input" type="checkbox" role="switch" data-mh="${esc(id)}"
@@ -2208,6 +2208,7 @@ const act = {
                    onchange="act.matToggle('${esc(id)}', this.checked)"></div></td>
           <td><b>${esc(h.label)}</b> ${on ? pill('ok dot', '已启用') : '<span class="chip">已停用</span>'}
             ${noKey ? ' <span class="chip warn">未配 Key → 自动跳过</span>' : ''}${h.station ? ' <span class="chip">上游自托管</span>' : ''}
+            ${h.custom ? `<span class="chip" title="已自定义：${esc((h.custom_fields || []).join('、'))}">已自定义</span>` : ''}
             <span class="ih-note">${esc(h.note)}</span></td>
           <td><span class="hint">${esc(kinds)}</span></td>
           <td><span class="hint">${esc(lim)}</span></td>
@@ -2216,17 +2217,19 @@ const act = {
           <td class="ih-act">
             <button class="btn btn-sm btn-outline-secondary" title="上移" aria-label="上移" onclick="act.matMove('${esc(id)}',-1)"><i class="ti ti-arrow-up"></i></button>
             <button class="btn btn-sm btn-outline-secondary" title="下移" aria-label="下移" onclick="act.matMove('${esc(id)}',1)"><i class="ti ti-arrow-down"></i></button>
+            <button class="btn btn-sm btn-outline-secondary" title="编辑站点：名称 / 上传地址 / Key / 接受类型 / 上限 / 有效期" onclick="act.matEdit('${esc(id)}')"><i class="ti ti-pencil"></i> 编辑</button>
             <button class="btn btn-sm btn-outline-secondary" title="上传 1×1 自检图" onclick="act.matTest('${esc(id)}')">自检</button>
           </td></tr>`; }).join('')}</tbody>
     </table></div>`;
   },
+
   matRefreshTable() { const w = $('#matTableWrap'); if (w && state.mat) w.innerHTML = act.matTable(state.mat); },
 
   async loadMedia() {
     const box = $('#matBox'); if (!box) return;
     const r = await api('/api/settings/media');
     if (!r || !r.ok || !r.data) { box.innerHTML = '<div class="hint">读取失败</div>'; return; }
-    const d = r.data, cfg = d.cfg || {};
+    const d = r.data, cfg = d.cfg || {}, pm = d.params || {};
     state.mat = d;
     $('#matState').innerHTML = cfg.enabled ? pill('ok', '已启用') : '<span class="pill">未启用</span>';
     box.innerHTML = `
@@ -2235,18 +2238,24 @@ const act = {
         <label class="form-check-label" for="matEnabled">启用素材中转（<span class="mono">POST /v1/files</span>：图片 / 视频 / 音频 → 公网直链）</label>
       </div>
       <div class="hint">候选顺序：从上到下依次尝试，第一个成功即用。<b>每行的开关点一下立刻生效</b>（不用再点保存）。
-        视频 / 音频会自动跳过只收图片的 ImgBB；超过某站上限的素材会跳过并记明原因。</div>
+        视频 / 音频会自动跳过只收图片的站点；超过某站上限的素材会跳过并注明原因。
+        需要填 <b>Key / 上传地址</b> 的站点（速搭水文件站、佳速素材 CDN 等），点该行 <b>「编辑」</b> 填即可。</div>
       <div id="matTableWrap">${act.matTable(d)}</div>
-      <div class="set-sec-t mt-4"><i class="ti ti-key"></i>上游文件站 Key</div>
-      <div class="row g-2">
-        <div class="col-md-6"><label class="form-label">速搭水文件站 Key
-          ${d.sudashui_key_set ? '（已配置 <span class="mono">' + esc(d.sudashui_key_masked) + '</span>，留空=不改）' : '（不填则跳过该站）'}</label>
-          <input id="matSdKey" class="form-control" autocomplete="off" placeholder="${d.sudashui_key_set ? '••••••••' : 'sk-...'}"></div>
-        <div class="col-md-6"><label class="form-label">佳速素材 CDN Key
-          ${d.jiasu_key_set ? '（已配置 <span class="mono">' + esc(d.jiasu_key_masked) + '</span>，留空=不改）' : '（不填则跳过该站）'}</label>
-          <input id="matJsKey" class="form-control" autocomplete="off" placeholder="${d.jiasu_key_set ? '••••••••' : 'sk-...'}"></div>
+      <div class="set-sec-t mt-4"><i class="ti ti-adjustments"></i>参数</div>
+      <div class="row g-2 align-items-end">
+        <div class="col-md-3"><label class="form-label">最大体积 MB</label>
+          <input id="matMb" class="form-control" type="number" min="1" max="200" value="${esc(pm.max_mb)}"></div>
+        <div class="col-md-3"><label class="form-label">上传超时 s</label>
+          <input id="matTo" class="form-control" type="number" min="5" max="180" value="${esc(pm.timeout_s)}"></div>
+        <div class="col-md-3"><label class="form-label">Litterbox 有效期</label>
+          <select id="matTtl" class="form-select">${['1h', '12h', '24h', '72h'].map(t =>
+            `<option ${pm.litterbox_time === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        <div class="col-md-3"><div class="form-check form-switch mb-1">
+          <input class="form-check-input" type="checkbox" id="matRef" ${d.ref_enabled ? 'checked' : ''}>
+          <label class="form-check-label" for="matRef">参考图 base64 → 直链</label></div>
+          <div class="hint">生图渠道只认公网 URL 时才转</div></div>
       </div>
-      <div class="hint mt-2"><i class="ti ti-shield-lock"></i> Key 加密落库、只在服务端使用，面板只回掩码；
+      <div class="hint mt-2"><i class="ti ti-shield-lock"></i> 各站 Key 加密落库、只在服务端使用，面板只回掩码；
         素材不落本机磁盘，直链就在对应站点的 CDN 上。</div>
       <div class="d-flex gap-2 mt-3 align-items-center flex-wrap">
         <button class="btn btn-primary" onclick="act.matSave()"><i class="ti ti-device-floppy"></i> 保存</button>
@@ -2259,12 +2268,12 @@ const act = {
   async matSave() {
     const on = $$('#matBox input[data-mh]').filter(x => x.checked).map(x => x.dataset.mh);
     const order = $$('#matBox [data-mh]').map(x => x.dataset.mh);
-    const body = {enabled: $('#matEnabled').checked, chain: order.filter(id => on.includes(id))};
-    const sd = ($('#matSdKey').value || '').trim(), jc = ($('#matJsKey').value || '').trim();
-    if (sd) body.sudashui_key = sd;
-    if (jc) body.jiasu_key = jc;
+    const body = {enabled: $('#matEnabled').checked, chain: order.filter(id => on.includes(id)),
+                  max_mb: +$('#matMb').value, timeout_s: +$('#matTo').value,
+                  litterbox_time: $('#matTtl').value, ref_enabled: $('#matRef').checked};
     const r = await api('/api/settings/media', {method: 'POST', body});
-    if (r && r.ok) { toast('素材中转设置已保存'); act.loadMedia(); } else toast('保存失败', true);
+    if (r && r.ok) { toast('素材中转设置已保存'); act.loadMedia(); }
+    else toast((r && r.data && r.data.error && r.data.error.message) || '保存失败', true);
   },
 
   async matToggle(id, on) {
@@ -2307,6 +2316,71 @@ const act = {
       + (d.verified ? '' : ` <span class="chip warn">回读未通过：${esc(d.verify_note || '')}</span>`)
       + (d.warnings && d.warnings.length ? ` <span class="hint">（前面失败：${esc(d.warnings.join('；'))}）</span>` : '');
     toast('素材中转自检通过：' + (d.host_label || d.host));
+  },
+
+  /* 站点「编辑」：名称 / 上传地址 / Key / 接受类型 / 上限 / 有效期 / 备注 / 上传字段名
+     —— 只渲染该站点允许改的字段（免费图床的接口地址由内置适配器固定，不给改，免得改了不生效）。 */
+  async matEdit(id) {
+    const d = state.mat || {};
+    const h = (d.hosts || []).find(x => x.id === id) || {};
+    const ed = h.editable || ['label', 'ttl', 'note', 'limit_mb'];
+    const has = f => ed.indexOf(f) > -1;
+    const kinds = (h.kinds || ['image']);
+    const cell = (f, html) => has(f) ? html : '';
+    const kindsHtml = has('kinds') ? `<div class="col-12"><label class="form-label d-block">接受类型</label>
+        <div id="meKinds">${['image', 'video', 'audio'].map(k => `<label class="form-check form-check-inline">
+          <input class="form-check-input" type="checkbox" data-mk="${k}" ${kinds.indexOf(k) > -1 ? 'checked' : ''}>
+          <span class="form-check-label">${act.matKindLabel(k)}</span></label>`).join('')}</div></div>` : '';
+    modal(`编辑站点 · ${h.label || id}`, `
+      <div class="row g-3">
+        ${cell('label', `<div class="col-md-6"><label class="form-label">站点名称</label>
+          <input id="meLabel" class="form-control" value="${esc(h.label || '')}"></div>`)}
+        ${cell('endpoint', `<div class="col-md-6"><label class="form-label">上传地址</label>
+          <input id="meEp" class="form-control mono" value="${esc(h.endpoint || '')}" placeholder="https://…"></div>`)}
+        ${cell('key', `<div class="col-md-6"><label class="form-label">API Key
+            ${h.key_set ? `（已配置 <span class="mono">${esc(h.key_masked || '')}</span>，留空=不改）` : '（不填则该站自动跳过）'}</label>
+          <input id="meKey" class="form-control" autocomplete="off" placeholder="${h.key_set ? '••••••••' : '粘贴 Key'}"></div>`)}
+        ${cell('field', `<div class="col-md-6"><label class="form-label">上传字段名</label>
+          <input id="meField" class="form-control mono" value="${esc(h.field || 'file')}" placeholder="file"></div>`)}
+        ${cell('limit_mb', `<div class="col-md-6"><label class="form-label">最大体积 MB</label>
+          <input id="meLimit" class="form-control" type="number" min="1" max="500" value="${esc(h.limit_mb)}"></div>`)}
+        ${cell('ttl', `<div class="col-md-6"><label class="form-label">有效期说明</label>
+          <input id="meTtl" class="form-control" value="${esc(h.ttl || '')}" placeholder="例如：上游自托管（长期）"></div>`)}
+        ${cell('note', `<div class="col-12"><label class="form-label">备注说明</label>
+          <input id="meNote" class="form-control" value="${esc(h.note || '')}" placeholder="例如：POST multipart（字段 file）+ Bearer Key"></div>`)}
+        ${kindsHtml}
+      </div>
+      <div class="hint mt-3">保存后<b>立即生效</b>；「恢复默认」只清掉这一行的自定义（<b>Key 不会被清</b>）。
+        ${h.station ? '自托管文件站：地址、Key、字段名都能改。' : (has('endpoint') ? '' : '该站的接口地址由内置适配器固定，只改展示类字段。')}</div>
+    `, `
+      <button class="btn btn-outline-secondary" onclick="act.matReset('${esc(id)}')"><i class="ti ti-rotate"></i> 恢复默认</button>
+      <button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+      <button class="btn btn-primary" onclick="act.matEditSave('${esc(id)}')"><i class="ti ti-device-floppy"></i> 保存</button>
+    `);
+  },
+
+  async matEditSave(id) {
+    const val = sel => { const e = $(sel); return e ? e.value.trim() : null; };
+    const patch = {};
+    const put = (sel, key, cast) => { const v = val(sel); if (v !== null) patch[key] = cast ? cast(v) : v; };
+    put('#meLabel', 'label'); put('#meEp', 'endpoint'); put('#meField', 'field');
+    put('#meTtl', 'ttl'); put('#meNote', 'note'); put('#meLimit', 'limit_mb', v => (v === '' ? null : +v));
+    const k = val('#meKey'); if (k) patch.key = k;
+    const kb = $('#meKinds');
+    if (kb) {
+      const ks = $$('#meKinds input[data-mk]').filter(x => x.checked).map(x => x.dataset.mk);
+      if (ks.length) patch.kinds = ks;
+    }
+    Object.keys(patch).forEach(x => { if (patch[x] === null || patch[x] === undefined) delete patch[x]; });
+    const r = await api('/api/settings/media', {method: 'POST', body: {hosts: {[id]: patch}}});
+    if (r && r.ok) { closeModal(); toast('已保存：' + id); act.loadMedia(); }
+    else toast((r && r.data && r.data.error && r.data.error.message) || '保存失败', true);
+  },
+
+  async matReset(id) {
+    const r = await api('/api/settings/media', {method: 'POST', body: {hosts: {[id]: {_reset: true}}}});
+    if (r && r.ok) { closeModal(); toast('已恢复默认：' + id); act.loadMedia(); }
+    else toast('恢复默认失败', true);
   },
 
   /* -------------------- 异步任务 -------------------- */
@@ -2470,140 +2544,7 @@ const act = {
   },
 
   /* -------------------- 设置 -------------------- */
-  /* ---------------- 图床（参考图 base64 → 公网直链） ---------------- */
-
-  /* 图床候选表：单独抽出来 —— 开关 / 上下移只重画这张表，不动上面正在填的参数
-     （否则会把还没保存的 ImgBB Key 冲掉）。每行一个独立开关，点一下即存。 */
-  ihTable(d) {
-    const cfg = (d || {}).cfg || {}, chain = (cfg.chain || []).slice();
-    const ids = (d.hosts || []).map(h => h.id);
-    const order = chain.concat(ids.filter(id => !chain.includes(id)));
-    const byId = {}; (d.hosts || []).forEach(h => byId[h.id] = h);
-    return `<div class="table-wrap mt-2"><table class="tb ih-tb">
-      <thead><tr><th>启用</th><th>服务</th><th>有效期</th><th>上传地址</th><th class="ih-act">操作</th></tr></thead>
-      <tbody>${order.map(id => {
-        const h = byId[id] || {id, label: id, ttl: '', note: '', endpoint: ''};
-        const on = chain.includes(id);
-        return `<tr>
-          <td><div class="form-check form-switch ih-sw">
-            <input class="form-check-input" type="checkbox" role="switch" data-ih="${esc(id)}"
-                   title="${on ? '点击停用' : '点击启用'} ${esc(h.label)}"
-                   aria-label="${on ? '停用' : '启用'} ${esc(h.label)}" ${on ? 'checked' : ''}
-                   onchange="act.ihToggle('${esc(id)}', this.checked)"></div></td>
-          <td><b>${esc(h.label)}</b> ${on ? pill('ok dot', '已启用') : '<span class="chip">已停用</span>'}${h.needs_key && !d.imgbb_key_set ? ' <span class="chip warn">未配 Key → 自动跳过</span>' : ''}
-            <span class="ih-note">${esc(h.note)}</span></td>
-          <td><span class="chip">${esc(h.ttl)}</span></td>
-          <td class="ih-ep">${esc(h.endpoint)}</td>
-          <td class="ih-act">
-            <button class="btn btn-sm btn-outline-secondary" title="上移" aria-label="上移" onclick="act.ihMove('${esc(id)}',-1)"><i class="ti ti-arrow-up"></i></button>
-            <button class="btn btn-sm btn-outline-secondary" title="下移" aria-label="下移" onclick="act.ihMove('${esc(id)}',1)"><i class="ti ti-arrow-down"></i></button>
-            <button class="btn btn-sm btn-outline-secondary" title="上传 1×1 自检图" onclick="act.ihTest('${esc(id)}')">自检</button>
-          </td></tr>`; }).join('')}</tbody>
-    </table></div>`;
-  },
-
-  /* 只重画候选表（保留上面的参数输入框内容） */
-  ihRefreshTable() {
-    const wrap = $('#ihTableWrap');
-    if (wrap && state.ih) wrap.innerHTML = act.ihTable(state.ih);
-  },
-
-  /* 每一行的独立启用 / 停用：点一下立刻保存，不用再点「保存」 */
-  async ihToggle(id, on) {
-    const d = state.ih; if (!d) return;
-    const chain = (d.cfg.chain || []).slice();
-    const ids = (d.hosts || []).map(h => h.id);
-    const order = chain.concat(ids.filter(x => !chain.includes(x)));
-    const next = order.filter(x => (x === id ? on : chain.includes(x)));
-    const r = await api('/api/settings/imagehost', {method: 'POST', body: {chain: next}});
-    if (!r || !r.ok || !r.data) { toast('切换失败，请重试', true); act.loadImagehost(); return; }
-    state.ih = r.data;
-    act.ihRefreshTable();
-    const h = (d.hosts || []).find(x => x.id === id) || {};
-    toast(`${on ? '已启用' : '已停用'} ${h.label || id}`);
-  },
-
-  async loadImagehost() {
-    const box = $('#ihBox'); if (!box) return;
-    const r = await api('/api/settings/imagehost');
-    if (!r || !r.ok || !r.data) { box.innerHTML = '<div class="hint">读取失败</div>'; return; }
-    const d = r.data, cfg = d.cfg || {};
-    state.ih = d;
-    $('#ihState').innerHTML = cfg.enabled ? pill('ok', '已启用') : '<span class="pill">未启用</span>';
-    box.innerHTML = `
-      <div class="form-check form-switch mb-2">
-        <input class="form-check-input" type="checkbox" id="ihEnabled" ${cfg.enabled ? 'checked' : ''}>
-        <label class="form-check-label" for="ihEnabled">启用图床转换（只对「只认公网 URL」「两者都支持」的渠道生效；只认 base64 的渠道永不走图床）</label>
-      </div>
-      <div class="hint">候选顺序：从上到下依次尝试，第一个成功即用。<b>每行的开关点一下立刻生效</b>（不用再点保存）；没启用的不会被使用。</div>
-      <div id="ihTableWrap">${act.ihTable(d)}</div>
-      <div class="set-sec-t mt-4"><i class="ti ti-adjustments"></i>参数</div>
-      <div class="row g-2">
-        <div class="col-md-6"><label class="form-label">ImgBB API Key
-          ${d.imgbb_key_set ? '（已配置 <span class="mono">' + esc(d.imgbb_key_masked) + '</span>，留空=不改）' : '（不填则跳过 ImgBB）'}</label>
-          <input id="ihKey" class="form-control" autocomplete="off" placeholder="${d.imgbb_key_set ? '••••••••' : '粘贴 API Key'}"></div>
-        <div class="col-md-3"><label class="form-label">Litterbox 有效期</label>
-          <select id="ihTtl" class="form-select">${['1h', '12h', '24h', '72h'].map(t =>
-            `<option ${cfg.litterbox_time === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-        <div class="col-md-3"><label class="form-label">最大体积 MB / 上传超时 s</label>
-          <div class="d-flex gap-2">
-            <input id="ihMb" class="form-control" type="number" min="1" max="20" value="${esc(cfg.max_mb)}">
-            <input id="ihTo" class="form-control" type="number" min="5" max="120" value="${esc(cfg.timeout_s)}">
-          </div></div>
-      </div>
-      <div class="hint mt-3"><i class="ti ti-alert-triangle"></i> 参考图会被上传到上面勾选的<b>第三方公共服务</b>（临时链接，会过期）。
-        别拿它传私密素材。本服务本身不落盘、不转存：只有「渠道官方文档只认公网 URL」时才转。</div>
-      <div class="d-flex gap-2 mt-3 align-items-center flex-wrap">
-        <button class="btn btn-primary" onclick="act.ihSave()"><i class="ti ti-device-floppy"></i> 保存</button>
-        <button class="btn btn-outline-secondary" onclick="act.ihTest()"><i class="ti ti-upload"></i> 上传 1×1 自检图</button>
-        <span class="hint">自检=真上传一张 1×1 像素图（不调用任何生图接口、不花钱）</span>
-      </div>
-      <div class="hint mt-2" id="ihMsg"></div>`;
-  },
-
-  async ihSave() {
-    const on = $$('#ihBox input[data-ih]').filter(x => x.checked).map(x => x.dataset.ih);
-    const order = $$('#ihBox [data-ih]').map(x => x.dataset.ih);
-    const body = {enabled: $('#ihEnabled').checked, chain: order.filter(id => on.includes(id)),
-                  litterbox_time: $('#ihTtl').value, max_mb: +$('#ihMb').value, timeout_s: +$('#ihTo').value};
-    const k = ($('#ihKey').value || '').trim();
-    if (k) body.imgbb_key = k;
-    const r = await api('/api/settings/imagehost', {method: 'POST', body});
-    if (r && r.ok) { toast('图床设置已保存'); act.loadImagehost(); } else toast('保存失败', true);
-  },
-
-  async ihMove(id, dir) {
-    const d = state.ih; if (!d) return;
-    const chain = (d.cfg.chain || []).slice();
-    const ids = (d.hosts || []).map(h => h.id);
-    const order = chain.concat(ids.filter(x => !chain.includes(x)));
-    const i = order.indexOf(id), k = i + dir;
-    if (i < 0 || k < 0 || k >= order.length) return;
-    [order[i], order[k]] = [order[k], order[i]];
-    const on = $$('#ihBox input[data-ih]').filter(x => x.checked).map(x => x.dataset.ih);
-    const r = await api('/api/settings/imagehost', {method: 'POST', body: {chain: order.filter(x => on.includes(x))}});
-    if (r && r.ok && r.data) { state.ih = r.data; act.ihRefreshTable(); }
-    else toast('调整顺序失败', true);
-  },
-
-  async ihTest(host) {
-    const msg = $('#ihMsg');
-    if (msg) msg.textContent = '上传中…（最长 30 秒）';
-    const r = await api('/api/settings/imagehost/test', {method: 'POST', body: host ? {host} : {}});
-    if (!r || !r.ok) {
-      const m = (r && r.data && r.data.error && r.data.error.message) || '自检失败';
-      if (msg) msg.innerHTML = '<span class="chip warn">' + esc(m) + '</span>';
-      return toast(m, true);
-    }
-    const d = r.data;
-    if (msg) msg.innerHTML = `✅ <b>${esc(d.host)}</b> 可用 → <a class="mono" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.url)}</a>`
-      + (d.verified ? '' : ` <span class="chip warn">回读未通过：${esc(d.verify_note || '')}</span>`)
-      + (d.warnings && d.warnings.length ? ` <span class="hint">（前面失败：${esc(d.warnings.join('；'))}）</span>` : '');
-    toast('图床自检通过：' + d.host);
-  },
-
   async loadSettings() {
-    act.loadImagehost();
     act.loadMedia();
     const r = await api('/api/sysinfo');
     if (!r) return;
