@@ -223,6 +223,44 @@ def _shrink(v):
     return v
 
 
+def _outbound(raw) -> dict:
+    """插件补写的「即将发给上游的报文」：tasks.private_data.plugin_state.__outbound。
+
+    任务插件（jiasuapi ≥1.0.12 / sudashui ≥1.0.5 / meaicc ≥1.0.2 / gaisc ≥1.0.3 /
+    aicost ≥1.0.8）在 parseSubmitResponse 里复算一份提交体、脱敏后写进快照，
+    因为 New API 自己**不落上游报文体**。这里再兜一层折叠，防旧数据/异常值过大。
+    """
+    if not raw:
+        return {}
+    try:
+        d = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:                                  # noqa: BLE001
+        return {}
+    ob = ((d or {}).get("plugin_state") or {}).get("__outbound") or {}
+    if not isinstance(ob, dict) or not ob:
+        return {}
+    out = {}
+    for k in ("plugin", "version", "url", "method", "action", "bytes", "error", "body_omitted"):
+        if ob.get(k) not in (None, ""):
+            out[k] = ob[k]
+    body = ob.get("body")
+    if isinstance(body, dict):
+        shrunk = _shrink(body)
+        out["body"] = shrunk
+        text = json.dumps(shrunk, ensure_ascii=False)
+        if len(text) > 20000:                          # 兜底：绝不把面板撑爆
+            if isinstance(shrunk, dict):
+                out["body"] = {k: v for k, v in shrunk.items()
+                               if isinstance(v, (str, int, float, bool))}
+            out["body_omitted"] = f"上游报文过大（约 {len(text)} 字符），已降级为浅层字段"
+    elif isinstance(body, str) and body:
+        out["body_text"] = _shrink(body)
+    for k in ("headers",):
+        if isinstance(ob.get(k), dict):
+            out[k] = _shrink(ob[k])
+    return out
+
+
 def _snapshot(raw) -> dict:
     """任务私有数据的请求快照：{plugin_state.request} → 面板字段。"""
     if not raw:
@@ -270,6 +308,7 @@ def _refs(snap: dict) -> list[str]:
 def _row_shape(t: dict, lg: dict, with_snapshot: bool) -> dict:
     """一行视频日志 → 面板形状（字段名与图片日志尽量对齐）。"""
     snap = _snapshot(t.get("private_data")) if with_snapshot else {}
+    ob = _outbound(t.get("private_data")) if with_snapshot else {}
     ts = int(t.get("created_at") or t.get("submit_time") or 0)
     quota_used = lg.get("quota_used") or 0
     quota_refund = lg.get("quota_refund") or 0
@@ -323,7 +362,7 @@ def _row_shape(t: dict, lg: dict, with_snapshot: bool) -> dict:
     if with_snapshot:
         row["client_request"] = snap
         row["reference_images"] = _refs(snap)
-        row["upstream_request"] = _upstream_echo(snap, lg, t)
+        row["upstream_request"] = _upstream_echo(snap, lg, t, ob)
     return row
 
 
@@ -338,20 +377,38 @@ def _result_urls(raw) -> list[str]:
     return [u for u in urls if isinstance(u, str)][:6]
 
 
-def _upstream_echo(snap: dict, lg: dict, t: dict) -> dict:
-    """上游报文：New API 不落上游报文体，这里给「我们确知的上游侧事实」。
+def _upstream_echo(snap: dict, lg: dict, t: dict, ob: dict | None = None) -> dict:
+    """上游报文区：优先用任务插件补写的真报文，退路才是「已知的上游侧事实」。
 
-    · 上游模型名（客户端模型名经 model_mapping 翻过去的真名）
-    · 插件（作者/版本）+ 请求路径
-    · 上游任务号（提交回执）
-    阶段 3 会让任务插件把「即将发出的 JSON（脱敏）」也写进快照，届时这里换成真报文。
+    · `ob` 来自 `plugin_state.__outbound`（插件 ≥ jiasuapi1.0.12 / sudashui1.0.5 /
+      meaicc1.0.2 / gaisc1.0.3 / aicost1.0.8 起补写）：就是**实际发给上游的 JSON**，
+      插件侧已脱敏（base64/超长值折叠、key 打码），网关侧再兜一层折叠。
+    · 老任务（插件未升级）没有 `__outbound` → 退回上游模型名 / 插件 / 上游任务号。
     """
+    ob = ob or {}
     out = {"upstream_model": lg.get("upstream_model") or "",
            "request_path": lg.get("request_path") or "/v1/videos",
            "plugin": f"{lg.get('plugin_name') or ''} {lg.get('plugin_version') or ''}".strip(),
-           "upstream_task_id": lg.get("upstream_task_id") or "",
-           "note": "New API 不记录任务上游报文体；下方为插件提交时回执的上游侧信息。"
-                   "若需完整上游报文，见「生成日志」阶段 3（插件快照补写脱敏报文）。"}
+           "upstream_task_id": lg.get("upstream_task_id") or ""}
+    payload = ob.get("body") if ob.get("body") is not None else ob.get("body_text")
+    if payload:
+        out["source"] = "plugin"
+        out["payload"] = payload
+        out["payload_bytes"] = ob.get("bytes")
+        out["payload_url"] = ob.get("url") or ""
+        out["payload_method"] = ob.get("method") or "POST"
+        out["snapshot_plugin"] = f"{ob.get('plugin') or ''} {ob.get('version') or ''}".strip()
+        out["note"] = ("上游报文由任务插件在提交时补写（脱敏：base64/超长值折叠、密钥打码），"
+                       "这就是该次实际发给上游的请求体。")
+    else:
+        out["source"] = "log"
+        out["note"] = ("该次提交的插件版本尚未补写上游报文（需 jiasuapi≥1.0.12 / "
+                       "sudashui≥1.0.5 / meaicc≥1.0.2 / gaisc≥1.0.3 / aicost≥1.0.8）；"
+                       "下方为插件回执的上游侧信息。")
+    if ob.get("error"):
+        out["plugin_error"] = ob["error"]
+    if ob.get("body_omitted"):
+        out["payload_omitted"] = ob["body_omitted"]
     if snap:
         out["submit_params"] = {k: v for k, v in snap.items()
                                 if k not in ("prompt", "reference_images", "images", "image_urls")}
@@ -376,12 +433,14 @@ def video_logs(limit: int = 50, status: str = "", model: str = "", channel: str 
         where.append("t.created_at >= %s")
         args.append(int(time.time()) - int(days) * 86400)
     if model:
-        where.append("(COALESCE(t.properties::jsonb->>'model','') LIKE %s OR COALESCE(t.private_data::jsonb#>>'{plugin_state,request,model}','') LIKE %s)")
-        args += [f"%{model}%"] * 2
+        where.append("(COALESCE(t.properties::jsonb->>'model','') LIKE %s OR COALESCE(t.private_data::jsonb#>>'{plugin_state,request,model}','') LIKE %s"
+                     " OR COALESCE(t.private_data::jsonb#>>'{plugin_state,__outbound,body,model}','') LIKE %s)")
+        args += [f"%{model}%"] * 3
     if q:
         where.append("(COALESCE(t.task_id,'') LIKE %s OR COALESCE(t.private_data::jsonb#>>'{plugin_state,request,prompt}','') LIKE %s "
+                     "OR COALESCE(t.private_data::jsonb#>>'{plugin_state,__outbound,body,prompt}','') LIKE %s "
                      "OR COALESCE(t.fail_reason,'') LIKE %s)")
-        args += [f"%{q}%"] * 3
+        args += [f"%{q}%"] * 4
     clause = (" AND " + " AND ".join(where)) if where else ""
     # 令牌筛选只能在 New API 日志里判，取足够多的候选再过滤（任务本身不存令牌）
     fetch = limit + 1 if not token else max(limit * 6, 300)

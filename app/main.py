@@ -34,7 +34,7 @@ from . import admin, channels, media, relay, store
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 
-app = FastAPI(title="qlikeapi-plugins", version = "3.21.0")
+app = FastAPI(title="qlikeapi-plugins", version = "3.21.1")
 app.include_router(relay.router, prefix="/up", tags=["upstream"])
 app.include_router(relay.router_v1, prefix="/v1", tags=["router"])   # 统一入口：New API 只挂这一个渠道
 app.include_router(media.router, prefix="/v1", tags=["media"])       # 素材上传中转：base64/文件 → 公网直链

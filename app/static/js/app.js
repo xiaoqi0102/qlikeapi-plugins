@@ -2008,6 +2008,20 @@ const act = {
     const results = (l.result_urls || []).map(u =>
       `<a class="mono" href="${esc(u)}" target="_blank" rel="noopener">${esc(String(u).slice(0, 78))}</a>`).join('<br>')
       || '<span class="hint">（还没有结果 / 失败无结果）</span>';
+    // ④ 上游报文：插件补写的真报文（__outbound）优先；没有就退回「回执的上游侧事实」
+    const hasUp = up.payload != null;
+    const upFacts = {
+      上游模型: up.upstream_model || '（日志里未记）',
+      上游任务号: up.upstream_task_id || '（日志里未记）',
+      请求路径: up.request_path || '',
+      插件: up.plugin || '',
+    };
+    const upCurl = hasUp ? ['curl ' + qt(up.payload_url || '（上游提交地址）') + ' ' + BS,
+      '  --request ' + (up.payload_method || 'POST') + ' ' + BS,
+      '  --header ' + qt('Authorization: Bearer ***') + ' ' + BS,
+      '  --header ' + qt('Content-Type: application/json') + ' ' + BS,
+      '  --data ' + qt(typeof up.payload === 'string' ? up.payload : JSON.stringify(up.payload, null, 2))]
+      .join('\n') : '';
     const box = (id, title, txt) => `
       <div class="curl-head mb-1"><label class="form-label mb-0">${title}</label>
         <div class="acts"><button class="btn btn-sm btn-outline-secondary" onclick="act.matCopy('${id}','已复制')"><i class="ti ti-clipboard"></i> 复制</button></div></div>
@@ -2027,14 +2041,27 @@ const act = {
       </div>
       ${l.fail_reason ? `<label class="form-label">失败原因</label><pre class="json mb-3">${esc(l.fail_reason)}</pre>` : ''}
       <div class="hint mb-3"><i class="ti ti-info-circle"></i> 视频不经过本网关（客户端 → New API → 任务插件 → 上游）。
-        下面是 New API 任务表里<b>插件写入的请求快照</b>、上游侧信息与计费（面板只读直连库取数）。</div>
+        下面是 New API 任务表里<b>插件写入的请求快照</b>（客户端请求 + 插件的上游报文）、上游侧信息与计费（面板只读直连库取数）。</div>
       <label class="form-label">① 客户端请求（New API 入库快照）</label>
       <pre class="json mb-3">${esc(JSON.stringify(d, null, 2))}</pre>
       ${box('vidCli', '② 还原成可执行 curl（提交同一个任务）', cliCurl)}
       ${box('vidQuery', '③ 查询任务状态', queryCurl)}
       <label class="form-label">参考图</label><div class="mb-3">${refs}</div>
-      <label class="form-label">④ 上游信息（插件提交时回执）</label>
-      <pre class="json mb-3">${esc(JSON.stringify(up, null, 2))}</pre>
+      <label class="form-label">④ 上游请求（${hasUp ? '插件补写的真报文 · 已脱敏' : '仅插件回执的上游侧事实'}）</label>
+      <div class="row mb-2">
+        ${hasUp ? pill('ok', '插件补写') : pill('warn', '仅回执事实')}
+        ${up.snapshot_plugin ? `<span class="chip">快照 ${esc(up.snapshot_plugin)}</span>` : ''}
+        ${hasUp && up.payload_method ? `<span class="chip mono">${esc(up.payload_method)}</span>` : ''}
+        ${hasUp && up.payload_url ? `<span class="chip mono">${esc(String(up.payload_url).slice(0, 64))}</span>` : ''}
+        ${hasUp && up.payload_bytes ? `<span class="chip mono">${esc(String(up.payload_bytes))} 字节</span>` : ''}
+      </div>
+      ${up.note ? `<div class="hint mb-2"><i class="ti ti-info-circle"></i> ${esc(up.note)}</div>` : ''}
+      ${up.payload_omitted ? `<div class="hint mb-2">${esc(up.payload_omitted)}</div>` : ''}
+      ${up.plugin_error ? `<div class="hint mb-2">插件未能复算上游报文：${esc(up.plugin_error)}</div>` : ''}
+      ${hasUp ? box('vidUp', '即将发给上游的 JSON（脱敏：base64/超长值折叠、密钥打码）', JSON.stringify(up.payload, null, 2)) : ''}
+      ${upCurl ? box('vidUpCurl', '复现上游调用的 curl（*** 换成你自己的上游 Key）', upCurl) : ''}
+      <label class="form-label">上游侧事实（New API 日志 · 与上面对照）</label>
+      <pre class="json mb-3">${esc(JSON.stringify(upFacts, null, 2))}</pre>
       <label class="form-label">⑤ 结果直链</label><div class="mb-3">${results}</div>
       <label class="form-label">⑥ 计费（New API）</label>
       <pre class="json">${esc(JSON.stringify(l.billing || {}, null, 2))}</pre>`);

@@ -944,3 +944,23 @@ table.tb th.ops-cell,table.tb td.ops-cell{white-space:nowrap;width:1%;text-align
 table.tb td.acts{display:table-cell;text-align:right;white-space:nowrap;width:1%}
 table.tb.ih-tb th.ih-act{text-align:right;white-space:nowrap;width:1%}
 .ops-row{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--sp-1)}
+
+/* ==================== Bootstrap 的 `.row>*` 陷阱：胶囊/按钮被撑成整行
+   用户反馈：详情弹窗顶部的状态胶囊、④ 上游请求的标签各占一行，竖向堆成一条。
+   原因：Bootstrap 的 `.row>*{width:100%;padding:0 gutter}` 权重(0,1,1) 高于组件类
+   `.chip`/`.pill`(0,1,0)，ui-kit 的 `.row{display:flex;flex-wrap:wrap}` 能改方向、
+   却改不了子元素宽度 —— 于是每个胶囊都占满一行。
+   做法：只对「胶囊 / 按钮 / 输入框 / 说明」这些本该按内容宽度排列的子元素收回宽度，
+   并把 Bootstrap 强加的 gutter 内边距还原成组件自身的内边距；
+   **不动 .col-* 网格子元素**（`row g-3` + `col-md-4` 那种表单布局照旧）。 */
+.row>.chip,.row>.pill,.row>.btn,.row>.hint,.row>.k,
+.row>.form-control,.row>.form-control-sm,.row>.form-select{
+  width:auto;max-width:none;flex:0 0 auto;padding-left:0;padding-right:0;
+}
+.row>.chip{padding:2px 8px;margin:1px 4px 1px 0}
+.row>.pill{padding:2px 9px}
+.row>.btn{padding:.42rem .82rem}
+.row>.btn-sm{padding:.24rem .6rem}
+.row>.form-control{padding:.375rem .75rem}
+.row>.form-control-sm{padding:.25rem .5rem}
+.row>.form-select{padding:.375rem 2.25rem .375rem .75rem}

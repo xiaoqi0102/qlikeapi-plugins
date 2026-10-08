@@ -119,3 +119,70 @@ def test_genlogs_cursor_paging_no_overlap(login):
     p2 = login.get("/api/genlogs?source=all&limit=3&days=0&cursor=" + p1["next_cursor"]).json()
     key = lambda r: (r["src"], r["id"])
     assert not ({key(r) for r in p1["data"]} & {key(r) for r in p2["data"]})
+
+
+# ---------------- v3.21.1：插件补写的「上游报文」快照（__outbound） ----------------
+
+def _task_with_outbound(body=None, **extra):
+    ob = {"plugin": "jiasuapi", "version": "1.0.12",
+          "url": "https://ai.jiasuapi.com/v1/video/generations", "method": "POST", "bytes": 123}
+    if body is not None:
+        ob["body"] = body
+    ob.update(extra)
+    return json.dumps({"plugin_state": {
+        "request": {"model": "seedance-2.0-900-0.70", "prompt": "一只猫"},
+        "__outbound": ob}})
+
+
+def test_outbound_extracted():
+    """插件写的上游报文：url / method / body / 插件名版本 都要能取出来。"""
+    ob = newapi._outbound(_task_with_outbound(
+        {"model": "seedance-2.0-900", "prompt": "一只猫在跳舞", "seconds": 5,
+         "images": ["https://a/b.png"]}))
+    assert ob["plugin"] == "jiasuapi" and ob["version"] == "1.0.12"
+    assert ob["url"].endswith("/v1/video/generations") and ob["method"] == "POST"
+    assert ob["body"]["prompt"] == "一只猫在跳舞" and ob["bytes"] == 123
+
+
+def test_outbound_missing_for_old_rows():
+    """老任务（插件未升级）没有 __outbound → 空 dict，且任何脏输入都不抛。"""
+    raw = json.dumps({"plugin_state": {"request": {"model": "m", "prompt": "p"}}})
+    assert newapi._outbound(raw) == {}
+    assert newapi._outbound(None) == {}
+    assert newapi._outbound("not-json") == {}
+    assert newapi._outbound(json.dumps({"plugin_state": {"__outbound": "oops"}})) == {}
+
+
+def test_outbound_never_leaks_base64():
+    big = "data:image/png;base64," + "B" * 40000
+    ob = newapi._outbound(_task_with_outbound({"model": "m", "images": [big, "https://a/b.png"]}))
+    text = json.dumps(ob, ensure_ascii=False)
+    assert "BBBB" not in text and "https://a/b.png" in text
+    assert any("base64" in str(v) for v in ob["body"]["images"])
+
+
+def test_upstream_echo_prefers_plugin_payload():
+    ob = newapi._outbound(_task_with_outbound({"model": "seedance-2.0-900", "prompt": "跳舞"}))
+    up = newapi._upstream_echo({}, {"upstream_model": "seedance-2.0-900", "plugin_version": "1.0.12"}, {}, ob)
+    assert up["source"] == "plugin" and up["payload"]["prompt"] == "跳舞"
+    assert up["payload_method"] == "POST" and "插件" in up["note"]
+    up2 = newapi._upstream_echo({}, {"upstream_model": "m"}, {})
+    assert up2["source"] == "log" and "payload" not in up2 and "尚未补写" in up2["note"]
+
+
+def test_upstream_echo_reports_plugin_error():
+    ob = newapi._outbound(_task_with_outbound(None, error="未能复算上游报文:api key is required"))
+    up = newapi._upstream_echo({}, {}, {}, ob)
+    assert up["source"] == "log" and "api key is required" in up["plugin_error"]
+
+
+def test_row_shape_exposes_upstream_payload(db):
+    task = {"id": 9, "task_id": "task_ob", "status": "SUCCESS", "created_at": 1000, "submit_time": 1000,
+            "channel_id": 20, "user_id": 1,
+            "private_data": _task_with_outbound({"model": "sd2", "prompt": "上游提示词"}),
+            "data": json.dumps({"result_urls": ["https://r/v.mp4"]})}
+    r = newapi._row_shape(task, {}, with_snapshot=True)
+    assert r["upstream_request"]["payload"]["prompt"] == "上游提示词"
+    assert r["upstream_request"]["source"] == "plugin"
+    assert r["client_request"]["prompt"] == "一只猫"
+    assert r["result_urls"] == ["https://r/v.mp4"] and r["tags"] == ["视频"]
