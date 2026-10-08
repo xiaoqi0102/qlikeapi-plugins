@@ -94,7 +94,7 @@
 
   /* 正文卡 */
   main{flex:1 1 auto;min-width:0;background:var(--card);border:1px solid var(--line);
-    border-radius:var(--radius);box-shadow:var(--shadow);padding:34px 42px 46px;overflow-wrap:break-word}
+    border-radius:var(--radius);box-shadow:var(--shadow);padding:28px 42px 46px;overflow-wrap:break-word}
   main>*:first-child{margin-top:0}
 
   main h1{font-size:30px;line-height:1.28;letter-spacing:-.022em;font-weight:700;margin:0 0 10px}
@@ -120,13 +120,28 @@
   main blockquote p{margin:4px 0;color:var(--fg-2);font-size:14.6px}
   main blockquote p:first-child{margin-top:0}
   main blockquote p:last-child{margin-bottom:0}
-  main hr{border:0;border-top:1px solid var(--line-2);margin:32px 0}
+
+  /* 首段引用 = 文档元信息卡（版本 / 日期 / 网关 / 在线地址） */
+  main blockquote.meta{padding:14px 16px 12px;border:1px solid color-mix(in srgb,var(--brand) 20%,var(--line));
+    border-left:3px solid var(--brand);background:linear-gradient(180deg,var(--brand-soft),transparent 140%)}
+  main blockquote.meta .mrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 8px}
+  main blockquote.meta .mrow:last-child{margin-bottom:0}
+  main blockquote.meta .chip{display:inline-flex;align-items:center;gap:5px;font-size:12.6px;line-height:1.6;
+    padding:2px 10px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--fg-2)}
+  main blockquote.meta .chip b{color:var(--fg);font-weight:650}
+  main blockquote.meta .chip.k{background:transparent;border-color:transparent;color:var(--muted);padding-left:0}
+  main blockquote.meta .mline{font-size:14px;color:var(--fg-2);margin:6px 0 0;padding-top:8px;
+    border-top:1px dashed var(--line-2)}
+  main blockquote.meta .mline:first-child{border-top:0;padding-top:0;margin-top:0}
+  main blockquote.meta code{background:var(--card)}
+  main hr{border:0;border-top:1px solid var(--line-2);margin:34px 0;opacity:.8}
 
   /* 表格：圆角 + 表头吸顶 + 隔行 */
   .tblwrap{overflow-x:auto;margin:16px 0;border:1px solid var(--line);border-radius:var(--radius-sm);
     background:var(--card-2);scrollbar-width:thin}
   table{width:100%;border-collapse:separate;border-spacing:0;font-size:13.8px;min-width:520px}
-  th,td{padding:9px 13px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line-2)}
+  th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line-2)}
+  td{line-height:1.7}
   th{position:sticky;top:0;background:var(--card-2);font-weight:650;color:var(--fg);white-space:nowrap;z-index:1;
     border-bottom:1px solid var(--line)}
   tbody tr:last-child td{border-bottom:0}
@@ -159,10 +174,10 @@
 
   /* ========== 窄屏：单列、目录折叠 ========== */
   @media (max-width:1000px){
-    .wrap{flex-direction:column;gap:16px;padding:18px 14px 80px}
-    nav.toc{position:static;width:100%;flex:none;max-height:none}
+    .wrap{flex-direction:column;align-items:stretch;gap:16px;padding:18px 14px 80px}
+    nav.toc{position:static;width:auto;max-width:100%;flex:none;max-height:none}
+    main{width:auto;max-width:100%;padding:24px 20px 34px;border-radius:12px}
     nav.toc .list{max-height:44vh}
-    main{padding:24px 20px 34px;border-radius:12px}
     main h1{font-size:24px}
     main h2{font-size:18px}
     #menuBtn{display:inline-flex}
@@ -189,9 +204,9 @@
     </div>
     <span class="spacer"></span>
     <button class="tbtn" id="menuBtn" onclick="toggleToc()"><span class="i" id="menuIco">☰</span> 目录</button>
-    <a class="tbtn primary" href="/api-docs.md?download=1"><span class="i">⤓</span> 下载 Markdown</a>
+    <button class="tbtn primary" onclick="copyAll(this)"><span class="i">⧉</span> 复制全文</button>
+    <a class="tbtn" href="/api-docs.md?download=1"><span class="i">⤓</span> 下载 Markdown</a>
     <a class="tbtn" href="/api-docs.md" target="_blank" rel="noopener"><span class="i">⌨</span> 源文件</a>
-    <button class="tbtn" onclick="copyAll(this)"><span class="i">⧉</span> 复制全文</button>
     <button class="tbtn" onclick="toggleTheme()" id="thBtn" title="切换浅色 / 深色"><span class="i">◐</span> <span id="thTxt">深色</span></button>
   </div>
 </header>
@@ -223,8 +238,19 @@ function esc(s) {
 }
 
 function render() {
-  marked.setOptions({ gfm: true, breaks: false });
+  marked.setOptions({ gfm: true, breaks: true });
   doc.innerHTML = marked.parse(MD);
+
+  // 首段引用 → 文档元信息卡（版本 / 更新日期 / 适用网关 做成胶囊，长链接单独一行）
+  const bq = doc.querySelector('blockquote');
+  if (bq && /版本/.test(bq.textContent)) {
+    const parts = bq.innerHTML.split(/<br\s*\/?>/i).map(x => x.trim()).filter(Boolean);
+    const head = (parts.shift() || '').split('　').filter(Boolean)
+      .map((x, i) => `<span class="chip${i ? '' : ' k'}">${x}</span>`).join('');
+    bq.innerHTML = `<div class="mrow">${head}</div>`
+      + parts.map(x => `<div class="mline">${x}</div>`).join('');
+    bq.classList.add('meta');
+  }
 
   // 表格包一层，窄屏可横滑、圆角不裂
   $$('#doc table').forEach(t => {
@@ -251,6 +277,17 @@ function render() {
   });
   toc.innerHTML = items.join('') || '<div class="none">（无目录）</div>';
   document.getElementById('tocCount').textContent = items.length ? items.length + ' 节' : '';
+
+  // 表格里的参数 / 地址：点一下即复制
+  $$('#doc table code, #doc blockquote code').forEach(c => {
+    c.style.cursor = 'copy';
+    c.title = '点击复制';
+    c.onclick = () => navigator.clipboard.writeText(c.innerText.trim()).then(() => {
+      const t = c.innerText;
+      c.innerText = '已复制 ✓';
+      setTimeout(() => { c.innerText = t; }, 900);
+    });
+  });
 
   // 代码块复制（异步渲染的 marked 产物已就位）
   $$('#doc pre').forEach(pre => {

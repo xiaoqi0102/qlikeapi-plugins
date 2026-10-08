@@ -287,7 +287,9 @@ def _key_of(host: str, cfg: dict) -> str:
 
 
 def key_state(host: str, cfg: dict) -> tuple[bool, str]:
-    """该站点的 Key 状态（面板只回掩码）。"""
+    """该站点的 Key 状态（面板只回掩码）；不需要 Key 的站点一律报「未配置」。"""
+    if host not in STATIONS and not (imagehost.HOSTS.get(host) or {}).get("needs_key"):
+        return False, ""
     k = _key_of(host, cfg)
     return bool(k), (store.mask(k) if k else "")
 
