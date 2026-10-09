@@ -1,3 +1,14 @@
+## v3.21.4 — 2026-10-09
+
+### 修：`PROJECT_INDEX.md` 路由表「尺寸换算」指向不准（纯文档，无行为变更）
+
+- 用两路子代理做过一次「接手对照」实测（一份带 `AGENTS.md`+`PROJECT_INDEX.md`、一份不给）：两边都能答对，
+  但带文档的那路**读入字符数约为对照的一半**（26k vs 55k）、且不必全仓 grep——**同时暴露出路由表这条不准**。
+- 原表把「尺寸换算 / 参考图转直链」合成一行、指向 `docs/SIZE-MAPPING.md` + `app/imagehost.py`；
+  实际换算代码在 **`app/utils.py::snap_size()`**（`protocols.py:24` 以 `snap_size = utils.snap_size` 复用，
+  出图路径 `protocols.py:601/647` 调用），Gemini 原生面另走 **`utils.gemini_plan()`**。
+  `app/imagehost.py` 只管参考图转直链。已拆成两行并改准。
+
 ## v3.21.3 — 2026-10-09
 
 ### 修：`make check` 重新变绿（7 处 lint）+ 补 AI 接手文档

@@ -16,7 +16,7 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **3.21.3**（2026-10-09，见 `CHANGELOG.md` 顶部） |
+| 当前版本 | **3.21.4**（2026-10-09，见 `CHANGELOG.md` 顶部） |
 | 仓库 / 分支 | `github.com/xiaoqi0102/qlikeapi-plugins` / `main`，MIT |
 | 运行形态 | 单容器 `qlikeapi-plugins`（healthy），端口 `127.0.0.1:18673`，单 SQLite 落库 |
 | 部署目录 | `/opt/qlikeapi-plugins`（`docker compose up -d --build` 构建） |
@@ -36,7 +36,8 @@
 | 改前端页面 / 样式 | `app/static/`；改样式前先读 `docs/DESIGN-SYSTEM.md`，改完跑 `make ui-lint` |
 | 改素材中转（`POST /v1/files`） | `app/media.py`、`docs/IMAGEHOST.md` |
 | 改站点余额取数 | `app/balances.py` |
-| 尺寸换算 / 参考图转直链 | `docs/SIZE-MAPPING.md`、`app/imagehost.py` |
+| 尺寸换算（客户端像素 → 上游实际尺寸） | 代码在 `app/utils.py`：`snap_size()`（GPT 系就近吸附；`protocols.py:24` 以 `snap_size = utils.snap_size` 复用，出图路径 `protocols.py:601/647` 调用）；Gemini 原生面另走 `utils.gemini_plan()`。说明文档 `docs/SIZE-MAPPING.md` |
+| 参考图转公网直链 / 内联 base64 | `app/imagehost.py`、`docs/IMAGEHOST.md` |
 | 查 HTTP 接口对外长什么样 | `docs/API.md`；在线页 `/api-docs`（源 `docs/api-docs.md`） |
 | 环境变量 / 调参 | `docs/CONFIGURATION.md`、`.env.example` |
 | 部署 / 反代 / 备份 / 升级回滚 | `docs/DEPLOYMENT.md` |
