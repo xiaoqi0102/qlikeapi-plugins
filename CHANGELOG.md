@@ -1,3 +1,15 @@
+## v3.21.3 — 2026-10-09
+
+### 修：`make check` 重新变绿（7 处 lint）+ 补 AI 接手文档
+
+- **lint（行为不变）**：`app/main.py` / `app/newapi.py` import 排序、`newapi.py` 的 `zip(strict=)`、
+  `media.py` 两处 `raise … from`、`relay.py` 未使用局部变量、`test_genlogs.py` 的 lambda 赋值，共 7 处全修。
+  此前 `make lint` 是红的——即本项目自己的「提交前必跑 `make check`」当时并未真正通过。现 `make check` 全绿。
+- **新增 AI 接手文档**：`AGENTS.md`（三条铁律 / 检索规则 / 架构硬约束 / 改动流程 / 别做的事）与
+  `PROJECT_INDEX.md`（一句话定位 + 「任务 → 先读哪个文件」路由表），让后续维护者与 AI 定位文件而不必通读源码。
+  两份文档的每一条结论都对照代码核实过；原先标注「待核实」的三点已定论（见 `AGENTS.md` 第 6 节）。
+- **README**：测试徽章与目录注释的过期数字 237 → **464 个用例**（实测 `make check` 通过）。
+
 ## v3.21.2 — 2026-10-08
 
 ### 修：接口文档页在 api.qlike.top 上「文档加载失败」

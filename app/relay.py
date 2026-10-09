@@ -402,7 +402,6 @@ def _convert_detail(notes: list) -> dict:
     """转换笔记 → 素材日志明细（纯函数，单测用）。空列表 → {}。"""
     ups = [n for n in notes if n.get("host")]
     ins = [n for n in notes if n.get("mode") == "inline"]
-    fails = [n for n in notes if n.get("fallback")]
     if not notes:
         return {}
     if ups and ins:

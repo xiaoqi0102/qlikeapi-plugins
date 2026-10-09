@@ -117,7 +117,8 @@ def test_genlogs_cursor_paging_no_overlap(login):
     if not p1["next_cursor"]:
         return
     p2 = login.get("/api/genlogs?source=all&limit=3&days=0&cursor=" + p1["next_cursor"]).json()
-    key = lambda r: (r["src"], r["id"])
+    def key(r):
+        return (r["src"], r["id"])
     assert not ({key(r) for r in p1["data"]} & {key(r) for r in p2["data"]})
 
 

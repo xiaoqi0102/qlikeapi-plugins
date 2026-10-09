@@ -85,7 +85,7 @@ def clear_cache() -> None:
 # ------------------------------------------------------------------ 连接与查询
 
 def _connect():
-    import psycopg2                                    # 延迟导入：没装也只影响视频区
+    import psycopg2  # 延迟导入：没装也只影响视频区
     s = settings()
     if not s["dsn"]:
         raise RuntimeError("未配置 New API 数据源（设置 → 生成日志数据源）")
@@ -103,7 +103,7 @@ def _q(sql: str, args: tuple = ()) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(sql, args)
             cols = [c.name for c in cur.description]
-            return [dict(zip(cols, r)) for r in cur.fetchall()]
+            return [dict(zip(cols, r, strict=False)) for r in cur.fetchall()]
     finally:
         try:
             conn.close()

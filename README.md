@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg)](Dockerfile)
-[![Tests](https://img.shields.io/badge/tests-237%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-464%20passed-brightgreen.svg)](tests/)
 
 </div>
 
@@ -198,9 +198,11 @@ qlikeapi-plugins/
 │   │   ├── ui-kit.html         #   组件库展示页（/ui-kit，每个组件都能真点）
 │   │   └── vendor/             #   本地自托管：Bootstrap 5 / Tabler Icons / Chart.js
 │   └── requirements.txt
-├── tests/                      # pytest：237 个用例，零网络零成本
+├── tests/                      # pytest：464 个用例，零网络零成本
 ├── scripts/                    # 运维/验收脚本（零成本验证）
 ├── docs/                       # 架构、插件开发、API、配置、部署、路线图
+├── AGENTS.md                   # ★ 接手本项目的 AI 必读（三条铁律 + 检索/改动规则）
+├── PROJECT_INDEX.md            # ★ 任务 → 先读哪个文件（路由表）
 ├── .github/                    # CI、issue/PR 模板、dependabot
 ├── docker-compose.example.yml  # 部署样例（真实 compose 不入库）
 ├── .env.example                # 环境变量样例（真实密钥不入库）

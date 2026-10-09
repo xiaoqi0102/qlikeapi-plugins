@@ -461,8 +461,8 @@ def _post_station(host: str, raw: bytes, mime: str, filename: str, kind: str,
         raise imagehost.UploadFailed(f"{label}: HTTP {r.status_code} {body[:200]}")
     try:
         j = r.json()
-    except Exception:
-        raise imagehost.UploadFailed(f"{label}: 返回不是 JSON：{body[:200]}")
+    except Exception as e:
+        raise imagehost.UploadFailed(f"{label}: 返回不是 JSON：{body[:200]}") from e
     # 佳速：HTTP 恒 200，业务成败在 success 字段
     if host == "jiasu_media":
         if not j.get("success"):
@@ -637,8 +637,8 @@ async def _read_input(request: Request) -> tuple[str, object, str, str]:
     if data is None and "application/json" in ct:
         try:
             data = json.loads((await request.body()) or b"{}")
-        except Exception:
-            raise ValueError("JSON 解析失败")
+        except Exception as e:
+            raise ValueError("JSON 解析失败") from e
     if isinstance(data, str):
         data = {"data_url": data}
     if isinstance(data, dict) and data:
