@@ -37,7 +37,7 @@
 <div class="kit-body">
   <div class="kit-toc">
     <a href="#c-color">色彩与排版</a><a href="#c-btn">按钮</a><a href="#c-badge">徽章标签</a>
-    <a href="#c-card">卡片与 KPI</a><a href="#c-table">表格</a><a href="#c-form">表单</a>
+    <a href="#c-card">卡片与 KPI</a><a href="#c-table">表格</a><a href="#c-json">JSON 树</a><a href="#c-form">表单</a>
     <a href="#c-picker">多选选择器</a><a href="#c-feedback">反馈</a><a href="#c-modal">弹窗</a>
     <a href="#c-util">工具类</a>
   </div>
@@ -123,6 +123,16 @@
       <button class="btn btn-sm btn-outline-secondary" onclick="demoEmpty()"><i class="ti ti-inbox"></i> 演示空状态</button>
     </div></header><div class="body" id="tableHost"></div>
       <div class="kit-code" style="margin:0 16px 16px">加载中用 UI.skelTable(列数, 行数)（列宽与真实表格对齐，避免加载完跳动）；无数据用 UI.empty('一句话说明 + 下一步该点什么', 'ti-inbox')</div>
+    </div>
+  </section>
+
+  <!-- JSON 树 -->
+  <section class="kit-sec" id="c-json">
+    <h2><i class="ti ti-brackets"></i>JSON 树<span class="pill">UI.jsonTree · .jt</span></h2>
+    <div class="panel"><header><h3>可折叠 JSON（日志详情用）</h3>
+      <div class="acts"><button class="btn btn-sm btn-outline-secondary" onclick="demoJsonLoose()"><i class="ti ti-file-text"></i> 演示非 JSON 回退</button></div>
+    </header><div class="body" id="jsonHost"></div>
+      <div class="kit-code" style="margin:0 16px 16px">UI.jsonTree(对象或JSON文本, {open:1})　·　报文被套两层时会自动剥两层（网关常见）　·　不是 JSON 就原样退回 &lt;pre&gt;，绝不吞内容</div>
     </div>
   </section>
 
@@ -264,11 +274,40 @@ document.getElementById('durRow').innerHTML = DURS.map(n =>
   `<button class="btn btn-sm btn-outline-secondary" title="${n} = ${rootVar(n)}"
      onclick="UI.toast('${n} = ${rootVar(n)}')">${n.replace('--dur', 'dur') || 'dur'} ${rootVar(n)}</button>`).join('');
 
+// 演示用序列（真实面板里来自 /api/stats 的 hourly / series，不编造）
+const SPARK_H = [3, 5, 4, 8, 9, 7, 12, 10, 14, 13, 17, 16, 19, 22, 20, 24, 21, 26, 25, 28, 30, 27, 32, 35];
+const SPARK_D = [42, 55, 48, 61, 58, 70, 66];
+
 document.getElementById('kpis').innerHTML =
   UI.stat('站点数量', '11', '已启用 11', 'ti-building', '') +
   UI.stat('可用余额合计', '$53.79', '按币种分别合计', 'ti-wallet', 'ok') +
   UI.stat('低余额预警', '0', '低于各自设定阈值', 'ti-bell', '') +
-  UI.stat('查询异常', '6', '网络/鉴权失败，点刷新重试', 'ti-alert-triangle', 'err');
+  UI.stat('查询异常', '6', '网络/鉴权失败，点刷新重试', 'ti-alert-triangle', 'err') +
+  // ↓ 迷你趋势线 + 环比：opt.spark 用真实序列（这里演示用的假数据），opt.delta 两期必须等长
+  UI.stat('今日请求', '128', '成功 126 · 失败 2' + UI.pill('ok', '98.4%'), 'ti-send', 'ok',
+    { spark: SPARK_H, sparkLabel: '最近 24 小时逐时请求量', delta: { pct: 12.5, label: '较前 24 小时' } }) +
+  UI.stat('累计调用', '139', '成功率 70.5% · 平均 31.9s', 'ti-stack-2', '',
+    { spark: SPARK_D, sparkLabel: '最近 7 天逐日请求量', delta: { pct: -4.2, label: '较上期' } });
+
+// JSON 树演示（真实场景＝日志详情里的请求报文）
+const DEMO_JSON = {
+  model: 'gpt-image-2',
+  prompt: '一张极简风格的电商主图：纯白背景，居中一瓶洗发水，柔光，影棚布光',
+  size: '1024x1024',
+  n: 1,
+  response_format: 'b64_json',
+  seed: 123456,
+  reference_images: ['<base64/data URI，约 812KB>'],
+};
+function demoJson() {
+  document.getElementById('jsonHost').innerHTML = UI.jsonTree(DEMO_JSON, { open: 2 });
+}
+function demoJsonLoose() {
+  document.getElementById('jsonHost').innerHTML =
+    '<div class="hint mb-2">上游返回的不是 JSON（纯文本 / HTML 报错页）时，原样显示，绝不吞：</div>' +
+    UI.jsonTree('<html><body>502 Bad Gateway</body></html>');
+}
+demoJson();
 
 const DEMO_ROWS = [
   ['change2pro', UI.chip('sub2api'), '$2.72', UI.pill('ok dot', '正常'),

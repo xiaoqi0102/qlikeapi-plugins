@@ -189,7 +189,10 @@ python3 scripts/ui_lint.py --report   # 只看报告不判失败（存量清点�
 | 组件 | 类名 | 用途 / 禁忌 |
 |---|---|---|
 | 面板 | `.panel > header/.body` | 功能块容器；`header` 里放 `h3` + `.acts` |
-| KPI 卡片 | `.stat`（`.ok/.warn/.err`） | 概览页顶部；`UI.stat(k,v,x,icon,tone)` |
+| KPI 卡片 | `.stat`（`.ok/.warn/.err`） | 概览页顶部；`UI.stat(k,v,x,icon,tone,opt)`，`opt` 见 §4.4 |
+| KPI 迷你趋势线 | `.stat > .spk` | 卡底 SVG 折线，由 `UI.stat` 的 `opt.spark` 生成；**序列必须来自真实接口**（`/api/stats` 的 `hourly`/`series`） |
+| KPI 环比标 | `.stat > .tr`（`.up/.down/.flat`） | 由 `opt.delta` 生成；**基期 ≤0 不显示**（宁可不显示也不编，见坑 23） |
+| JSON 树 | `.jt`（`.jr/.nk/.ns/.nn/.nb/.nm/.pc`） | 日志详情里的请求报文；`UI.jsonTree(data, {open,max})`，见 §4.4 |
 | 表格 | `.table-wrap > table.tb` | 列表页统一用它；表头吸顶、行 hover |
 | 徽章 | `.pill` + `ok/warn/err/info` + `dot` | **只**表达状态，不要自定义含义 |
 | 标签 | `.chip` | 中性信息：类型、模型名、渠道 key |
@@ -212,7 +215,7 @@ python3 scripts/ui_lint.py --report   # 只看报告不判失败（存量清点�
 ```
 基础   UI.$  UI.$$  UI.esc  UI.fmtTime  UI.timeAgo  UI.fmtMs  UI.money  UI.cur  UI.copy
 反馈   UI.busy(on)  UI.toast(msg,bad)  UI.modal(...)  UI.closeModal()  UI.confirm(msg,opts)
-展示   UI.pill  UI.chip  UI.stat  UI.empty  UI.table  UI.skelTable  UI.bar(pct)
+展示   UI.pill  UI.chip  UI.stat  UI.empty  UI.table  UI.skelTable  UI.bar(pct)  UI.jsonTree
 表单   UI.picker(host, opts)
 ```
 
@@ -234,6 +237,28 @@ UI.picker('#pkModels', {
 - **不要用逗号分隔的文本框**：手输拼错模型名/渠道名看不出来，也选不出不存在的项。
 - 候选集来自 `GET /api/meta/options`（模型 + 渠道 + 币种，只读、不打上游）。
 - 必须挂在 `UI.modal(...)` 的第 4 个参数（`onShown`）里 —— 弹窗淡入前控件尺寸为 0，下拉定位会错位。
+
+### 4.4 KPI 趋势/环比 与 JSON 树
+
+```js
+// 趋势线 + 环比 = UI.stat 的可选第 6 参（不传时渲染与旧版完全一致，纯加性）
+UI.stat('今日请求', '128', '成功 126 · 失败 2', 'ti-send', 'ok', {
+  spark: [3, 5, 4, 8, 9, 7, ...],          // 真实序列 → 卡底迷你折线
+  sparkLabel: '最近 24 小时逐时请求量',      // 写进 <title>，悬停能说清统计口径
+  delta: { pct: 12.5, label: '较前 24 小时' } // pct 为 null/NaN 时整块不显示
+});
+
+// 可折叠 JSON 树（日志详情的请求报文，替代裸 <pre>）
+UI.jsonTree(objOrText, { open: 2, max: 160 });  // open=默认展开层数，max=叶子字符串截断长度
+```
+
+三条硬规矩：
+
+1. **趋势线只用真实序列** —— 没数据就传空数组（不画线），**不许造一条好看的假曲线**。
+2. **环比必须是「等长相邻窗口」** —— 后端的 `prev24h`（`/api/stats`）与 `prev`（`/api/usage`）都是紧邻等长窗口。
+   **不要用「今日 vs 昨日」**：今日是进行中的半天，拿整日做基数会虚报跌幅（凌晨尤其离谱）。
+3. **基期 ≤0 就不显示环比**（`pctChg` 返回 null）—— 除零算出来的"暴涨 900%"是假数据；
+   JSON 树同理，解析不了就原样退回 `<pre>`，**绝不吞日志内容**。
 
 ---
 
@@ -362,6 +387,23 @@ make ui-diff                               # 5. 新旧样式 A/B 逐元素比对
 21. **批量替换 CSS 要按「声明」粒度，不能按行** —— 本项目一行常有多条声明；且声明可能以 `}` 结尾
     （`color:#fff}`），用 `(?=;|$)` 会漏掉一大批。替换脚本用 `(?=[;}]|$)`，且 `rgba(...)` 结尾不能用 `\b` 收边
     （`)` 不是单词字符，会导致整类 rgba 漏替换）。
+22. **报文经常被「套两层」** —— 客户端 body 本身是一段 JSON 文本，网关又原样存了一层：
+    `JSON.parse` 一次拿回来的**还是字符串** → 整棵树退化成一个叶子节点（JSON 树看着"渲染了"其实什么都没解析）。
+    所以最多剥两层（v3.21.5 已修）。判断口径：`typeof root === 'string'` 就再 parse 一次，剥不动才退回 `<pre>`。
+23. **环比不能用「今日 vs 昨日」** —— 今日是进行中的半天，拿整日做基数会虚报跌幅（凌晨 0 点尤其离谱）。
+    一律用**紧邻等长窗口**（`prev24h` / `prev`）；基期 ≤0 时 `pctChg` 返回 null 并**不显示**环比，
+    宁可不显示也不给一个除零算出来的"暴涨"。KPI 卡的趋势线同理：没数据就不画，不许造好看的假曲线。
+24. **A/B 验收脚本自己会骗人（假差异三大来源）** —— 日志页首渲染要 ~3 秒（`sk sk-h` 骨架屏未退场就抓，
+    2850 vs 2658 元素）；页面每 30 秒整页重画（`#autoBtn` 可暂停）；点"暂停"弹的 toast 3.8 秒过期，
+    两次抓取之间就没了。**抓样式前必须先 `pause_autorefresh()` + `settle()`**（等 `.sk/.sk-wrap` 退场 + toast 消失），
+    否则满屏"差异"全是自己造成的。诊断顺序：先量接口时延（`0.01s` 说明不是加载慢）→ 再查自动刷新 → 再查骨架屏。
+25. **「每行跑一次」的 LATERAL 子查询 = 全表扫 N 次** —— 列表页的模型名兜底原写成
+    `LEFT JOIN LATERAL (SELECT ... FROM logs l WHERE (l.other::jsonb)->>'task_id' = t.task_id ...)`：
+    该表达式**没有索引**，53 行任务就要顺序扫 `logs`（2 万行）53 次 —— **实测 4277ms**，
+    超过自己设的 `statement_timeout=3000ms` → `/api/genlogs?source=all` 直接 **500**。
+    改法不是加超时（那是掩盖），而是**去掉冗余**：`_log_rows` 本来就按 `task_id = ANY(...)` 批量聚合过一遍，
+    在上面加 `(array_agg(l.model_name ORDER BY l.id DESC))[1] AS latest_model` 就拿到了同义结果 ——
+    **4277ms → 7.4ms（580×）**。教训：**列表页 SQL 里凡"每行一次"的关联，先看能不能并进已有的批量聚合**。
 
 ---
 

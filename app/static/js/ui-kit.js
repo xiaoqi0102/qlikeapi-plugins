@@ -169,11 +169,91 @@
   /** 中性标签：用于「类型 / 操作 / 模型名」这类辅助信息 */
   UI.chip = (text, cls) => '<span class="chip ' + (cls || '') + '">' + UI.esc(text) + '</span>';
 
-  /** KPI 卡片 */
-  UI.stat = (k, v, x, icon, tone) =>
-    '<div class="stat ' + (tone || '') + '">' +
-    (icon ? '<div class="ico"><i class="ti ' + icon + '"></i></div>' : '') +
-    '<div class="k">' + UI.esc(k) + '</div><div class="v">' + v + '</div><div class="x">' + x + '</div></div>';
+  /** KPI 卡片
+   *  opt.spark      数字数组 → 卡底画一条迷你趋势线（真实序列，不编数据）
+   *  opt.sparkLabel 趋势线的时间口径说明（如「最近 24 小时逐时」），写进 <title> 悬停可见
+   *  opt.delta      {pct, label} → 环比小标；pct 为 null/NaN 时**不显示**（宁可不显示也不编造）
+   *                 label 写清跟谁比（如「较昨日」），因为口径是本服务算的，不写清会误导
+   */
+  UI.stat = (k, v, x, icon, tone, opt) => {
+    const o = opt || {};
+    let foot = '';
+    if (o.delta && o.delta.pct != null && isFinite(o.delta.pct)) {
+      const p = o.delta.pct, dir = p > 0 ? 'up' : (p < 0 ? 'down' : 'flat');
+      const ico = p > 0 ? 'ti-trending-up' : (p < 0 ? 'ti-trending-down' : 'ti-minus');
+      const num = Math.abs(p) >= 100 ? String(Math.round(p)) : p.toFixed(1).replace(/\.0$/, '');
+      foot = '<span class="tr ' + dir + '" title="' + UI.esc(o.delta.label || '') + '">'
+        + '<i class="ti ' + ico + '"></i>' + (p > 0 ? '+' : '') + num + '%'
+        + (o.delta.label ? '<span class="hint">' + UI.esc(o.delta.label) + '</span>' : '') + '</span>';
+    }
+    return '<div class="stat ' + (tone || '') + '">' +
+      (icon ? '<div class="ico"><i class="ti ' + icon + '"></i></div>' : '') +
+      '<div class="k">' + UI.esc(k) + '</div><div class="v">' + v + '</div>' +
+      '<div class="x">' + x + (foot ? ' ' + foot : '') + '</div>' +
+      (o.spark && o.spark.length > 1 ? UI.spark(o.spark, o.sparkLabel) : '') + '</div>';
+  };
+
+  /** 迷你趋势线（Sparkline）：一串数字 → 折线 + 淡填充
+   *  只画「走势」，不画坐标轴、不标数值（精确值看卡片上的大数字）。
+   *  viewBox 归一化 0-100 × 0-26 + preserveAspectRatio=none，宽度自适应卡片，不用量 DOM。
+   *  颜色全部走 .spk 的 CSS（tokens 变量），因此深浅色自动跟随，也不触发 ui-lint 的硬编码色。
+   */
+  UI.spark = (vals, label) => {
+    const a = (vals || []).map((n) => Number(n) || 0);
+    if (a.length < 2) return '';
+    const W = 100, H = 26, PAD = 2;
+    const max = Math.max.apply(null, a), min = Math.min.apply(null, a);
+    const span = (max - min) || 1;                       // 全等序列 → 画成一条平的线，不除零
+    const X = (i) => (i / (a.length - 1)) * W;
+    const Y = (n) => PAD + (1 - (n - min) / span) * (H - PAD * 2);
+    const line = a.map((n, i) => (i ? 'L' : 'M') + X(i).toFixed(2) + ' ' + Y(n).toFixed(2)).join(' ');
+    const area = line + ' L' + W + ' ' + H + ' L0 ' + H + ' Z';
+    return '<svg class="spk" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true"'
+      + ' focusable="false">' + (label ? '<title>' + UI.esc(label) + '</title>' : '')
+      + '<path class="fill" d="' + area + '"></path><path class="line" d="' + line + '"></path></svg>';
+  };
+
+  /** 可折叠 JSON 树：给长报文用（裸 JSON 一屏看不完，尤其日志详情里那些上游报文）
+   *  用原生 <details> 折叠，零额外 JS、零事件绑定；键按类型着色，颜色全走 CSS 变量。
+   *  opt.open 初始展开深度（默认 1：只铺开第一层，深层的自己点）
+   *  opt.max  超过这么多字符的字符串收成摘要 + title 悬停看全文（默认 160）
+   *  传进来不是合法 JSON 时**回退成原来的 <pre>**，绝不把日志内容吞掉。
+   */
+  UI.jsonTree = (data, opt) => {
+    const o = opt || {};
+    const openDepth = o.open == null ? 1 : o.open;
+    const maxLen = o.max == null ? 160 : o.max;
+    let root = data;
+    /* 报文常常被「套了两层」：客户端 body 本身就是一段 JSON 文本（网关又原样存了一层），
+       只 JSON.parse 一次，拿回来的还是字符串 —— 树就退化成一个叶子节点了（这个坑真踩过）。
+       所以最多剥两层；剥不动（本来就不是 JSON）就原样回退成 <pre>，绝不吞日志内容。 */
+    for (let i = 0; i < 2 && typeof root === 'string'; i++) {
+      try { root = JSON.parse(root); } catch (e) { break; }
+    }
+    if (typeof root === 'string') return '<pre class="json">' + UI.esc(data) + '</pre>';
+    const leaf = (v) => {
+      if (v === null || v === undefined) return '<span class="nl">null</span>';
+      if (typeof v === 'number') return '<span class="nn">' + v + '</span>';
+      if (typeof v === 'boolean') return '<span class="nb">' + v + '</span>';
+      const s = String(v);
+      return s.length > maxLen
+        ? '<span class="ns" title="' + UI.esc(s) + '">"' + UI.esc(s.slice(0, maxLen)) + '…"</span>'
+        : '<span class="ns">"' + UI.esc(s) + '"</span>';
+    };
+    const walk = (node, depth) => {
+      if (node === null || typeof node !== 'object') return leaf(node);
+      const isArr = Array.isArray(node);
+      const keys = isArr ? node.map((_, i) => i) : Object.keys(node);
+      if (!keys.length) return '<span class="nb">' + (isArr ? '[]' : '{}') + '</span>';
+      return '<details' + (depth < openDepth ? ' open' : '') + '><summary>'
+        + '<span class="nk">' + (isArr ? '[' + keys.length + ']' : '{' + keys.length + '}') + '</span>'
+        + '<span class="nm">' + (isArr ? 'array' : 'object') + '</span></summary>'
+        + keys.map((k) => '<div class="jr"><span class="nk">' + UI.esc(k) + '</span><span class="pc">:</span> '
+            + walk(node[k], depth + 1) + '</div>').join('')
+        + '</details>';
+    };
+    return '<div class="jt">' + walk(root, 0) + '</div>';
+  };
 
   /** 空状态（虚线框 + 图标 + 一句引导语，必须给下一步动作） */
   UI.empty = (text, icon) => '<div class="empty"><i class="ti ' + (icon || 'ti-inbox') + '"></i>' + UI.esc(text) + '</div>';

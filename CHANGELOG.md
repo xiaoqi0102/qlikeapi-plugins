@@ -1,3 +1,43 @@
+## v3.21.5 — 2026-10-10
+
+### 新：KPI 迷你趋势线 + 环比；日志详情改用可折叠 JSON 树
+
+参照 octopus-ui-kit（React 版控制台）**只挑件、不换栈** —— 本项目是零构建纯静态栈
+（Bootstrap 5 + 手写 `app.js` + 自研 `tokens.css`/`ui-kit.css`）：换引擎是负收益，且会与
+`docs/DESIGN-SYSTEM.md` 两套设计系统并存、品牌色串色。核实后：候选 4 项里有 3 项本项目**早已有且更细**
+（详情面板多行 prompt + 可复制 curl、圆角/字号/阴影档位、游标分页），故只做真缺口。
+
+- **KPI 趋势线 + 环比（加性）**：`UI.stat` 增加可选第 6 参 `{spark, sparkLabel, delta}`，
+  不传时渲染与旧版**完全一致**（`make ui-diff` 16/16 状态 0 差异为证）。
+  序列取自真实接口（`/api/stats` 的 `hourly`/`series`），**不编数据**。
+- **后端补对称窗口**：`/api/stats` 加 `prev24h`、`/api/usage` 加 `prev`（紧邻等长窗口）。
+  **不用「今日 vs 昨日」** —— 今日是进行中的半天，拿整日做基数会虚报跌幅；
+  基期 ≤0 时 `pctChg` 返回 null，卡片上**不显示**环比（宁可不显示也不给除零假涨幅）。
+- **日志详情改用可折叠 JSON 树**：新增 `UI.jsonTree()`，图片/视频日志详情 3 处裸 `<pre>` 换掉。
+  解析失败原样退回 `<pre>`，**绝不吞日志内容**。
+- **修 bug：JSON 树被「套两层」的报文骗了** —— 客户端 body 本身就是一段 JSON 文本、网关又原样存一层，
+  `JSON.parse` 一次拿回来的**还是字符串** → 树退化成单个叶子节点。改为最多剥两层。
+
+### 修：`/api/genlogs?source=all` 返回 500（既有性能 bug：实测 4277ms > 超时 3000ms）
+
+- **根因**：`app/newapi.py` 的 `_TASK_SQL` 里有个**逐行执行**的 `LEFT JOIN LATERAL`，靠
+  `(l.other::jsonb)->>'task_id' = t.task_id` 去 `logs`（2 万行）里捞模型名；**该表达式没有索引**
+  → 53 行任务就要顺序扫 `logs` 53 次（每次 `Rows Removed by Filter: 6611`，合计 47k 次缓冲命中），
+  撞上本模块自己的 `statement_timeout=3000ms` → 生成日志页默认加载直接 500。
+- **做法（不是加超时掩盖）**：该关联**本就冗余** —— `_log_rows` 已经按 `task_id = ANY(...)` 批量聚合过一遍，
+  在其上加 `(array_agg(l.model_name ORDER BY l.id DESC))[1] AS latest_model` 即得同义结果；
+  模型名兜底改在 Python 侧补（`video_logs` 循环内 `if not t["model"]`），语义与旧 LATERAL 一致。
+- **实测**：`EXPLAIN ANALYZE` **4277.5ms → 7.4ms（580×）**；聚合查询 183ms（均在 3s 内）。
+
+### 验收
+
+`node --check` ✓ · `make ui-lint` 0 违规 ✓ · `pytest` 464 个全过 ✓ · 重建镜像 ✓ ·
+`make ui-diff` **16/16 状态、合计差异 0（退出码 0）** ✓ · `/healthz` 正常、`plugin_errors` 空 ✓
+
+- 顺手修掉验收脚本自身的三个时序缺陷（日志页骨架屏 ~3s 未退场 / 每 30s 整页重画 / toast 3.8s 过期），
+  否则 `make ui-diff` 会满屏"假差异"—— 见 `DESIGN-SYSTEM.md` 坑 24。
+- `DESIGN-SYSTEM.md` 新增坑 22–25；新组件已在 `/ui-kit` 展示页登记（§4.1 表 + §4.2 清单 + §4.4 用法）。
+
 ## v3.21.4 — 2026-10-09
 
 ### 修：`PROJECT_INDEX.md` 路由表「尺寸换算」指向不准（纯文档，无行为变更）

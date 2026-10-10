@@ -153,13 +153,9 @@ SELECT t.id, t.task_id, t.platform, t.status, t.progress, t.fail_reason, t.actio
        t.created_at, t.submit_time, t.start_time, t.finish_time,
        t.private_data, t.data, t.properties,
        c.name AS channel_name, c.type AS channel_type,
-       COALESCE(t.properties::jsonb->>'model', lg.model_name) AS model
+       COALESCE(t.properties::jsonb->>'model', '') AS model
 FROM tasks t
 LEFT JOIN channels c ON c.id = t.channel_id
-LEFT JOIN LATERAL (
-    SELECT l.model_name FROM logs l
-     WHERE (l.other::jsonb)->>'task_id' = t.task_id ORDER BY l.id DESC LIMIT 1
-) lg ON true
 WHERE TRUE
 """
 
@@ -182,6 +178,8 @@ def _log_rows(task_ids: list[str]) -> dict[str, dict]:
     rows = _q("""
         SELECT (l.other::jsonb)->>'task_id' AS tid,
                max(l.model_name) AS model_name,
+               -- 最近一条日志的模型名（原来靠 tasks 侧一个逐行 LATERAL 取，太慢已删；语义保持一致）
+               (array_agg(l.model_name ORDER BY l.id DESC))[1] AS latest_model,
                max(l.username) AS username,
                max(l.token_name) AS token_name,
                max(l.channel_name) AS channel_name,
@@ -449,6 +447,9 @@ def video_logs(limit: int = 50, status: str = "", model: str = "", channel: str 
     out = []
     for t in rows:
         lg = logs.get(t.get("task_id")) or {}
+        # 模型名兜底：任务表只存 properties.model，缺了才用日志里最近一条的（与旧 LATERAL 同义）
+        if not t.get("model"):
+            t["model"] = lg.get("latest_model") or lg.get("model_name") or ""
         if token and token.lower() not in str(lg.get("token_name") or "").lower():
             continue
         out.append(_row_shape(t, lg, with_snapshot=True))

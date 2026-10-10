@@ -948,6 +948,9 @@ def api_stats(request: Request, days: int = 7):
 
     today = window("ts>=?", (day0,))
     last24h = window("ts>=?", (now - 86400,))
+    # 前 24 小时（紧邻的等长窗口）——给 KPI 卡算「真实环比」用。
+    # 为什么不用「今日 vs 昨日」：今日是进行中的半天，跟昨天一整天比会虚报跌幅（凌晨尤其离谱）。
+    prev24h = window("ts>=? AND ts<?", (now - 172800, now - 86400))
     total = window("1=1", ())
 
     # 逐时（最近 24 小时）
@@ -998,7 +1001,8 @@ def api_stats(request: Request, days: int = 7):
     health = store.rows("SELECT * FROM health ORDER BY provider")
     jobs = store.one("""SELECT COUNT(*) n, SUM(CASE WHEN status='RUNNING' THEN 1 ELSE 0 END) running,
                                SUM(CASE WHEN status='DONE' THEN 1 ELSE 0 END) done FROM jobs""") or {}
-    return {"today": today, "last24h": last24h, "total": total, "hourly": hourly, "series": series,
+    return {"today": today, "last24h": last24h, "prev24h": prev24h, "total": total,
+            "hourly": hourly, "series": series,
             "per_provider": per_provider, "per_model": per_model, "recent_errors": recent_errors,
             "health": health, "jobs": jobs,
             "providers_total": store.one("SELECT COUNT(*) n FROM providers")["n"],
@@ -1400,6 +1404,10 @@ def api_usage(request: Request, days: int = 7, start: int | None = None, end: in
                 "p95_ms": p95}
 
     summary = agg(where, args)
+    # 上一周期：等长、紧邻本周期之前的那一段（今天↔昨天、7 天↔前 7 天、30 天↔前 30 天）。
+    # 只用来给 KPI 卡算「真实环比」——两个窗口等长才可比，不拿半截比整段。
+    prev_where, prev_args = _usage_where(start - span, start, provider, model, kind)
+    prev = agg(prev_where, prev_args)
 
     unit = 3600 if bucket == "hour" else 86400
     base = (end // unit) * unit
@@ -1444,7 +1452,7 @@ def api_usage(request: Request, days: int = 7, start: int | None = None, end: in
         store.price_for(r["model"], "*") == 0]
 
     return {"range": {"start": start, "end": end, "days": days, "bucket": bucket},
-            "summary": summary, "series": series,
+            "summary": summary, "prev": prev, "series": series,
             "distributions": {"provider": dist("provider"), "model": dist("model"),
                               "operation": dist("public_path"), "kind": dist("kind"),
                               "token": dist("token")},

@@ -272,11 +272,22 @@ const act = {
     if (!r) return;
     const d = r.data;
     const t = d.today, l24 = d.last24h, tt = d.total;
+    /* 迷你趋势线的数据源：逐时/逐日都是后端真实序列，没有编造；
+       「近 24 小时」的环比用的是后端新给的 prev24h（紧邻的等长窗口），
+       不用「今日 vs 昨日」——今日是进行中的半天，那样比会虚报跌幅。 */
+    const HN = (d.hourly || []).map(x => x.n);
+    const HM = (d.hourly || []).map(x => x.avg_ms);
+    const DN = (d.series || []).map(x => x.n);
+    const p24 = d.prev24h || {};
     $('#kpis').innerHTML = `
-      ${stat('今日请求', t.n, `成功 ${t.ok} · 失败 ${t.err} ${ratePill(t.success_rate, t.n)}`, 'ti-send', t.success_rate >= 99 ? 'ok' : '')}
-      ${stat('今日平均 / P95', fmtMs(t.avg_ms), `P95 ${fmtMs(t.p95_ms)} · 最慢 ${fmtMs(t.max_ms)}`, 'ti-stopwatch')}
-      ${stat('近 24 小时', l24.n, `成功率 ${l24.success_rate}% · 重试 ${Math.max(0, (l24.attempts||0) - l24.n)} 次`, 'ti-history')}
-      ${stat('累计调用', tt.n, `成功率 ${tt.success_rate}% · 平均 ${fmtMs(tt.avg_ms)}`, 'ti-stack-2')}
+      ${stat('今日请求', t.n, `成功 ${t.ok} · 失败 ${t.err} ${ratePill(t.success_rate, t.n)}`, 'ti-send', t.success_rate >= 99 ? 'ok' : '',
+        {spark: HN, sparkLabel: '最近 24 小时逐时请求量'})}
+      ${stat('今日平均 / P95', fmtMs(t.avg_ms), `P95 ${fmtMs(t.p95_ms)} · 最慢 ${fmtMs(t.max_ms)}`, 'ti-stopwatch', '',
+        {spark: HM, sparkLabel: '最近 24 小时逐时平均耗时'})}
+      ${stat('近 24 小时', l24.n, `成功率 ${l24.success_rate}% · 重试 ${Math.max(0, (l24.attempts||0) - l24.n)} 次`, 'ti-history', '',
+        {spark: HN, sparkLabel: '最近 24 小时逐时请求量', delta: {pct: pctChg(l24.n, p24.n), label: '较前 24 小时'}})}
+      ${stat('累计调用', tt.n, `成功率 ${tt.success_rate}% · 平均 ${fmtMs(tt.avg_ms)}`, 'ti-stack-2', '',
+        {spark: DN, sparkLabel: '最近 7 天逐日请求量'})}
       ${stat('渠道 / 插件', `${d.providers_enabled}/${d.providers_total}`, `已装载插件 ${d.plugins.length} 个`, 'ti-plug')}
       ${stat('异步任务', d.jobs.n || 0, `进行中 ${d.jobs.running || 0} · 完成 ${d.jobs.done || 0}`, 'ti-hourglass')}`;
 
@@ -348,11 +359,23 @@ const act = {
     const r = await api(`/api/usage?days=${u.days}&bucket=auto`);
     if (!r) return;
     const d = r.data, s0 = d.summary;
+    /* 用量页 KPI：趋势线取本区间的真实桶序列；环比用后端新给的 prev（等长的上一周期：
+       今天↔昨天、7 天↔前 7 天、30 天↔前 30 天）。上期无数据时 pctChg 返回 null → 不显示。 */
+    const kB = d.range.bucket === 'hour' ? '逐时' : '逐日';
+    const SN = (d.series || []).map(x => x.requests);
+    const SI = (d.series || []).map(x => x.images);
+    const SC = (d.series || []).map(x => x.cost);
+    const SM = (d.series || []).map(x => x.avg_ms);
+    const pv = d.prev || {};
     $('#usageKpis').innerHTML = `
-      ${stat('请求数', s0.requests, `成功 ${s0.success} · 失败 ${s0.failure} ${ratePill(s0.success_rate, s0.requests)}`, 'ti-send')}
-      ${stat('产出图片', s0.images, '按成功响应里的图片数统计', 'ti-photo')}
-      ${stat('估算费用', fmtCosts(s0.cost_by_currency || {}), d.unpriced_models.length ? `${d.unpriced_models.length} 个模型未配单价` : '全部模型已配单价', 'ti-coin', 'ok')}
-      ${stat('平均 / P95 耗时', fmtMs(s0.avg_ms), `P95 ${fmtMs(s0.p95_ms)} · 最慢 ${fmtMs(s0.max_ms)}`, 'ti-stopwatch')}`;
+      ${stat('请求数', s0.requests, `成功 ${s0.success} · 失败 ${s0.failure} ${ratePill(s0.success_rate, s0.requests)}`, 'ti-send', '',
+        {spark: SN, sparkLabel: `本区间${kB}请求量`, delta: {pct: pctChg(s0.requests, pv.requests), label: '较上期'}})}
+      ${stat('产出图片', s0.images, '按成功响应里的图片数统计', 'ti-photo', '',
+        {spark: SI, sparkLabel: `本区间${kB}产出张数`, delta: {pct: pctChg(s0.images, pv.images), label: '较上期'}})}
+      ${stat('估算费用', fmtCosts(s0.cost_by_currency || {}), d.unpriced_models.length ? `${d.unpriced_models.length} 个模型未配单价` : '全部模型已配单价', 'ti-coin', 'ok',
+        {spark: SC, sparkLabel: `本区间${kB}费用`})}
+      ${stat('平均 / P95 耗时', fmtMs(s0.avg_ms), `P95 ${fmtMs(s0.p95_ms)} · 最慢 ${fmtMs(s0.max_ms)}`, 'ti-stopwatch', '',
+        {spark: SM, sparkLabel: `本区间${kB}平均耗时`})}`;
 
     const M = {requests:['n','请求量','#2f6bff'], images:['images','图片张数','#8b5cf6'], cost:['cost','费用（元）','#0ea5e9']}[u.metric];
     const pts = (d.series || []).map(x => ({
@@ -2042,8 +2065,7 @@ const act = {
       ${l.fail_reason ? `<label class="form-label">失败原因</label><pre class="json mb-3">${esc(l.fail_reason)}</pre>` : ''}
       <div class="hint mb-3"><i class="ti ti-info-circle"></i> 视频不经过本网关（客户端 → New API → 任务插件 → 上游）。
         下面是 New API 任务表里<b>插件写入的请求快照</b>（客户端请求 + 插件的上游报文）、上游侧信息与计费（面板只读直连库取数）。</div>
-      <label class="form-label">① 客户端请求（New API 入库快照）</label>
-      <pre class="json mb-3">${esc(JSON.stringify(d, null, 2))}</pre>
+      ${act.rawBox('① 客户端请求（New API 入库快照）', d, JSON.stringify(d, null, 2))}
       ${box('vidCli', '② 还原成可执行 curl（提交同一个任务）', cliCurl)}
       ${box('vidQuery', '③ 查询任务状态', queryCurl)}
       <label class="form-label">参考图</label><div class="mb-3">${refs}</div>
@@ -2090,6 +2112,16 @@ const act = {
     const m = /<参考图 base64 数据，约 (\d+)KB>/.exec(String(upTxt || '') + String(reqTxt || ''));
     return m ? `base64 直传（约 ${m[1]}KB，网关未转换）` : '';
   },
+  /* 长报文块：上面给可折叠 JSON 树（看结构：哪一层有什么键），
+     下面折一份原始文本（要照抄 / 要精确到标点时用）—— 两样都在，不用来回切视图。
+     解析不了的话 UI.jsonTree 会自己退回 <pre>，所以这里不用判断。 */
+  rawBox(title, raw, txt) {
+    return `<label class="form-label">${title}</label>
+      <div class="mb-3">${UI.jsonTree(raw, {open: 1})}
+        <details class="jt-raw"><summary class="hint">看原始报文（可照抄）</summary>
+          <pre class="json mb-0">${esc(txt)}</pre></details></div>`;
+  },
+
   async logDetail(id) {
     const r = await api('/api/logs/' + id);
     if (!r) return;
@@ -2151,9 +2183,12 @@ const act = {
       ${curlBox('up', '② 完整请求 · 本网关 → 上游', upRead, upStrict)}
       <div class="hint mb-3">① 是客户端发来的入口形态（凭据已换成 YOUR_QLIKE_TOKEN）；② 是翻译后真正发给上游的报文
         （凭据已换成 YOUR_API_KEY，可直接复制去实测）。「提示词多行」把 JSON 字符串里的 \\n 还原成真实换行，方便读；要直接粘贴执行请切「严格 JSON」。</div>
-      <label class="form-label">① 客户端请求（原始报文）</label><pre class="json mb-3">${esc(jsonTxt(l.request_json, false))}</pre>
-      <label class="form-label">② 发给上游的请求（翻译后 · 原始报文）</label><pre class="json mb-3">${esc(jsonTxt(l.upstream_request, false))}</pre>
-      <label class="form-label">响应片段</label><pre class="json">${esc(jsonTxt(l.response_snippet, false))}</pre>`);
+      ${act.rawBox('① 客户端请求（原始报文）', l.request_json, jsonTxt(l.request_json, false))}
+      ${act.rawBox('② 发给上游的请求（翻译后 · 原始报文）', l.upstream_request, jsonTxt(l.upstream_request, false))}
+      <label class="form-label">响应片段</label>
+      <div>${UI.jsonTree(l.response_snippet, {open: 1})}
+        <details class="jt-raw"><summary class="hint">看原始报文（可照抄）</summary>
+          <pre class="json mb-0">${esc(jsonTxt(l.response_snippet, false))}</pre></details></div>`);
   },
 
   /* -------------------- 素材日志（图片 / 视频 / 音频 → 公网直链） -------------------- */
@@ -2827,6 +2862,12 @@ const act = {
 };
 
 /* ---------------- 小工具 ---------------- */
+/* 环比：本期 vs 上期（**两期必须等长才可比**）。上期为 0 → 返回 null，卡片就不显示环比标，
+   宁可少一个数字，也不拿 ÷0 算出来的假涨幅糊弄人。 */
+function pctChg(cur, base) {
+  if (!(base > 0)) return null;
+  return Math.round((cur - base) / base * 1000) / 10;
+}
 function fmtCosts(byCur) {
   const parts = Object.entries(byCur || {}).filter(([, v]) => v > 0)
     .map(([c, v]) => (c === 'USD' ? '$' : '¥') + Number(v).toFixed(2));

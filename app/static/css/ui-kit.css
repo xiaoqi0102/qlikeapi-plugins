@@ -964,3 +964,41 @@ table.tb.ih-tb th.ih-act{text-align:right;white-space:nowrap;width:1%}
 .row>.form-control{padding:.375rem .75rem}
 .row>.form-control-sm{padding:.25rem .5rem}
 .row>.form-select{padding:.375rem 2.25rem .375rem .75rem}
+/* ==================== KPI 卡片：迷你趋势线 + 环比标（v3.21.5 加性新增）
+   只新增 .stat 的子元素类（.spk 趋势线 / .tr 环比标），不改 .stat 既有任何属性，
+   因此不改动既有卡片的计算样式（ui-diff 里只需把这两个新类列入「新增组件」白名单）。
+   颜色/字号/圆角全部走 tokens.css 变量 → 深色模式自动跟随，无 .dark 分支。 */
+.stat .spk{display:block;width:100%;height:26px;margin-top:var(--sp-2)}
+.stat .spk .line{fill:none;stroke:var(--brand);stroke-width:1.6;vector-effect:non-scaling-stroke;
+  stroke-linejoin:round;stroke-linecap:round}
+.stat .spk .fill{fill:var(--brand-soft);opacity:.75;stroke:none}
+.stat .tr{display:inline-flex;align-items:center;gap:var(--sp-1);font-size:var(--fs-xs);font-weight:600;
+  padding:1px var(--sp-2);border-radius:var(--r-pill);background:var(--surface-3);color:var(--muted);
+  white-space:nowrap}
+.stat .tr .hint{font-weight:400}
+.stat .tr.up{background:var(--ok-soft);color:var(--ok-ink)}
+.stat .tr.down{background:var(--err-soft);color:var(--err-ink)}
+
+/* ==================== 可折叠 JSON 树（v3.21.5 加性新增，日志详情长报文用）
+   原生 <details> 折叠，零 JS；键按类型着色（全走变量）。默认只展开第一层。 */
+.jt{font-family:var(--mono);font-size:var(--fs-sm);line-height:1.65;color:var(--ink-2);
+  background:var(--field);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:var(--sp-2) var(--sp-3);max-height:320px;overflow:auto}
+.jt details{margin-left:var(--sp-3)}
+.jt>details{margin-left:0}
+.jt summary{cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:var(--sp-1)}
+.jt summary::-webkit-details-marker{display:none}
+.jt summary::before{content:"\25B8";display:inline-block;width:1em;color:var(--muted);flex:0 0 auto}
+.jt details[open]>summary::before{content:"\25BE"}
+.jt .jr{padding-left:var(--sp-3)}
+.jt .nk{color:var(--brand-text)}
+.jt .nm{color:var(--muted);font-size:var(--fs-xs)}
+.jt .ns{color:var(--ok-ink);word-break:break-all}
+.jt .nn{color:var(--brand-text)}
+.jt .nb{color:var(--warn-ink)}
+.jt .nl{color:var(--muted)}
+.jt .pc{color:var(--muted)}
+/* 「看原始报文」折叠：树下面挂原文，两样都在，不用来回切视图 */
+.jt-raw{margin-top:var(--sp-1)}
+.jt-raw>summary{cursor:pointer;user-select:none}
+.jt-raw .json{margin-top:var(--sp-1)}
